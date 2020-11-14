@@ -1,0 +1,43 @@
+#!/bin/bash
+pi="3.141592653589793"
+
+deg2rad () {
+        bc -l <<< "scale=12; $1 * $pi/180"
+}
+
+rad2deg () {
+        bc -l <<< "scale=12; $1 * 180/$pi"
+}
+
+acos () {
+        bc -l <<<"scale=12; $pi / 2 - a($1 / sqrt(1 - $1 * $1))"
+}
+
+distance () {
+        lat1="${1%,*}"
+        lon1="${1##*,}"
+        lat2="${2%,*}"
+        lon2="${2##*,}"
+
+        lat1="`deg2rad $lat1`"
+        lon1="`deg2rad $lon1`"
+        lat2="`deg2rad $lat2`"
+        lon2="`deg2rad $lon2`"
+
+        dlat=`bc -l <<< "$lat2 - $lat1"`
+        dlon=`bc -l <<< "$lon2 - $lon1"`
+	
+	distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
+	distance=$(acos "$distance")
+	distance=$(bc -l <<< "scale=12; $distance * 6371")
+	distance=$(bc <<<"scale=4; $distance / 1")
+
+        echo $distance
+}
+
+if [ $# -ne 2 ]; then
+	echo "$0 lat1,lon1 lat2,lon2" >&2
+	exit 1;
+fi;
+
+distance ${1} ${2}

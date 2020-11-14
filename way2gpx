@@ -1,0 +1,229 @@
+#!/bin/bash
+
+# Close STDERR FD
+#exec 2<&-
+# Open STDOUT as $LOG_FILE file for read and write.
+#exec 2<>/tmp/index.log
+#trap 'rm -rf "${TMPDIR}"' EXIT
+
+osmurl="https://www.openstreetmap.org/api/0.6"
+#TMPDIR=$(mktemp -d) || exit 1
+TMPDIR="/tmp"
+#echo "Our temp file is ${TMPDIR}"
+
+function downloadOsmPart {
+	local file="${TMPDIR}/${1}.xml"
+	file=${file/\/full/-full}
+	[ -d ${file%/*} ] || mkdir -p ${file%/*}
+	
+	if [ ! -e ${file} ]; then
+        	echo "Download ... "${1} >&2
+		curl --silent "${osmurl}/${1}" -o ${file}
+	        local status=$?
+		[ -e ${file} ] || status=1;
+	        if [ $status -gt 0 ]; then
+	        	echo "Bad download [status=$status] ${osmurl}/${1}" >&2
+	        	return $status;
+	        fi;
+	fi;
+	ls -la ${file} >&2
+	ls ${file}
+}
+
+while [ $# -ne 0 ]; do
+	arg="$1"
+	case "${arg}" in
+		--output|-o)
+			shift
+			gpxfile=$1
+			;;
+		--reverse|-r)
+			reverse=true
+			;;
+		*)
+			idway=$1
+			;;
+	esac
+	shift
+done
+
+if [ -z "${idway}" ]; then
+	echo -e "$0 [--reverse|-r] [--output|-o file.gpx] numberofway" >&2
+	echo -e "\tconvert osm way to gpx" >&2
+	echo -e "\tExample: $0 327497062" >&2
+	exit 1;
+fi
+
+osmfile=$(downloadOsmPart way/${idway}/full || exit $?)
+
+echo ${osmfile}
+echo "Extract data"
+
+NODEFILE=$(mktemp) || exit 1
+
+name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+author=$(grep -oP '<way(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
+wayts=$(grep -oP '<way(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
+
+[ "$name" == "" ] && name=${idway}
+
+echo "Extract coordinates"
+
+grep "<node" ${osmfile} | while read -r line; do
+#	echo "$line"
+	visible=$(echo ${line} | grep -oP '<node(.*) visible="\K[^"]*' | tr -d '\n')
+	[ "${visible}" != "true" ] && continue
+	id=$(echo ${line} | grep -oP '<node(.*) id="\K[^"]*' | tr -d '\n')
+	ts=$(echo ${line} | grep -oP '<node(.*) timestamp="\K[^"]*' | tr -d '\n')
+	lat=$(echo ${line} | grep -oP '<node(.*) lat="\K[^"]*' | tr -d '\n')
+	lon=$(echo ${line} | grep -oP '<node(.*) lon="\K[^"]*' | tr -d '\n')
+	echo "$id $lat,$lon $ts" >> ${NODEFILE}
+done
+
+declare -A arr
+while read -r line; do
+	id=$(echo $line | cut -d ' ' -f1)
+	ll=$(echo $line | cut -d ' ' -f2)
+	arr["${id}"]="$ll"
+done < ${NODEFILE}
+
+
+# Boundary
+latmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k1 | head -n 1 | cut -d ',' -f1)
+latmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k1 | head -n 1 | cut -d ',' -f1)
+lonmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k2 | head -n 1 | cut -d ',' -f2)
+lonmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k2 | head -n 1 | cut -d ',' -f2)
+
+# Zjištění posledního data modifikace nodů nebo cesty
+echo -n "0000000000 00.0000000,00.0000000 ${wayts}" >> "${NODEFILE}"
+lastts=$(sort "${NODEFILE}" -r -k 3 | head -n 1 | cut -d ' ' -f 3);
+
+rm -vf ${NODEFILE}
+
+
+declare -a nodes
+nodes=( `grep -oP '<nd(.*) ref="\K[^"]*' ${osmfile}` )
+
+if [ "$reverse" == "true" ]; then
+	echo "Reverse nodes..."
+	min=0
+	max=$(( ${#nodes[@]} -1 ))
+	while [[ $min -lt $max ]]; do
+		# Swap current first and last elements
+		x="${nodes[$min]}"
+		nodes[$min]="${nodes[$max]}"
+		nodes[$max]="$x"
+
+		# Move closer
+		(( min++, max-- ))
+	done
+fi;
+
+read -r -d '' gpx_head << EOM1
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<gpx version="1.1"
+	creator="way2gpx - https://osm.slavics.cz"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://www.topografix.com/GPX/1/1"
+	xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+EOM1
+read -r -d '' gpx_metadata << EOM2
+	<metadata>
+		<bounds minlat="${latmin}" maxlat="${latmax}" minlon="${lonmin}" maxlon="${lonmax}"/>
+	</metadata>
+EOM2
+read -r -d '' gpx_trkhead << EOM3
+	<trk>
+		<src>OpenStreetMap</src>
+		<link href="${osmurl}/way/${idway}"><text>Way ${idway}</text></link>
+		<trkseg>
+EOM3
+
+
+echo "Last timestamp="${lastts}
+echo "Name=$name"
+echo "Author=$author"
+[ "$desc" != "" ] && echo "Description=$desc"
+
+[ "$author" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>"};
+[ "$lastts" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<time>${lastts}</time>"};
+[ "$desc" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<desc>${desc}</desc>"};
+[ "$name" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<name>${name}</name>"};
+
+[ "${gpxfile}" == "" ] && gpxfile="${idway}.gpx"
+
+exec 3<&-
+# Open STDOUT as $LOG_FILE file for read and write.
+exec 3<>${gpxfile}
+
+
+echo -e "${gpx_head}" >&3
+echo -e "\t${gpx_metadata}" >&3
+echo -e "\t${gpx_trkhead}" >&3
+
+
+for ((i = 0; i < ${#nodes[@]}; i++)); do
+	n=${nodes[$i]};
+	coo=${arr[$n]};
+#	echo "$i. $n "
+#    <trkpt lat="59.4408327" lon="24.74516185"/>
+	echo -e "\t\t\t<trkpt lat=\"${coo%,*}\" lon=\"${coo##*,}\"/>" >&3
+	
+	if [ $i -eq 0 ]; then
+		sumdist=0;
+	else
+		dist=$(./distance $lastcoo ${arr[$n]})
+		sumdist=$(echo "$sumdist + $dist" | bc -l)
+		#echo " $dist $sumdist"
+	fi;
+	lastcoo=${arr[$n]}
+done
+
+echo "Distance: $sumdist" >&2
+
+echo -e "\t\t</trkseg>\n\t</trk>\n</gpx>" >&3
+
+
+echo "Exit 0"
+exit 0
+********************************************************************************
+filename=$(basename -- "$fullfile")
+extension="${filename##*.}"
+filename="${filename%.*}"
+********************************************************************************
+declare -A arr
+arr["key1"]=val1
+arr+=( ["key2"]=val2 ["key3"]=val3 )
+
+for key in ${!arr[@]}; do
+    echo ${key} ${arr[${key}]}
+done
+********************************************************************************
+Reverse
+array=(1 2 3 4 5 6 7)
+
+min=0
+max=$(( ${#array[@]} -1 ))
+
+while [[ min -lt max ]]
+do
+    # Swap current first and last elements
+    x="${array[$min]}"
+    array[$min]="${array[$max]}"
+    array[$max]="$x"
+
+    # Move closer
+    (( min++, max-- ))
+done
+echo "${array[@]}"
+
+********************************************************************************
+	local ref=$(grep -oP '<tag k=\"ref\"(.*) v="\K[^"]*' ${file} | tr -d '\n')
+	local color=$(grep -oP '<tag k=\"colour\"(.*) v="\K[^"]*' ${file} | tr -d '\n')
+	local name=$(grep -oP '<tag k=\"name\"(.*) v="\K[^"]*' ${file} | tr -d '\n')
+local diffTime= $(($(date +%s) - $(date +%s -r ${file})))
+	local date=$(grep -oP '<relation id="'${id}'"(.*) timestamp="\K[^"]*' ${file} | tr -d '\n')
+	date=$(date -d "${date}" +"%F %T")
+
