@@ -137,7 +137,7 @@ EOM2
 read -r -d '' gpx_trkhead << EOM3
 	<trk>
 		<src>OpenStreetMap</src>
-		<link href="https://www.openstreetmap.org/way/${wayid}"><text>Way ${wayid}</text></link>
+		<link href="https://www.openstreetmap.org/way/${wayid}"><text>$name</text></link>
 		<trkseg>
 EOM3
 
