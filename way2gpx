@@ -41,20 +41,20 @@ while [ $# -ne 0 ]; do
 			reverse=true
 			;;
 		*)
-			idway=$1
+			wayid=$1
 			;;
 	esac
 	shift
 done
 
-if [ -z "${idway}" ]; then
+if [ -z "${wayid}" ]; then
 	echo -e "$0 [--reverse|-r] [--output|-o file.gpx] numberofway" >&2
 	echo -e "\tconvert osm way to gpx" >&2
 	echo -e "\tExample: $0 327497062" >&2
 	exit 1;
 fi
 
-osmfile=$(downloadOsmPart way/${idway}/full || exit $?)
+osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
 
 echo ${osmfile}
 echo "Extract data"
@@ -67,7 +67,7 @@ note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 author=$(grep -oP '<way(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
 wayts=$(grep -oP '<way(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
 
-[ "$name" == "" ] && name=${idway}
+[ "$name" == "" ] && name=${wayid}
 
 echo "Extract coordinates"
 
@@ -137,7 +137,7 @@ EOM2
 read -r -d '' gpx_trkhead << EOM3
 	<trk>
 		<src>OpenStreetMap</src>
-		<link href="${osmurl}/way/${idway}"><text>Way ${idway}</text></link>
+		<link href="https://www.openstreetmap.org/way/${wayid}"><text>Way ${wayid}</text></link>
 		<trkseg>
 EOM3
 
@@ -152,7 +152,7 @@ echo "Author=$author"
 [ "$desc" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<desc>${desc}</desc>"};
 [ "$name" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<name>${name}</name>"};
 
-[ "${gpxfile}" == "" ] && gpxfile="${idway}.gpx"
+[ "${gpxfile}" == "" ] && gpxfile="${wayid}.gpx"
 
 exec 3<&-
 # Open STDOUT as $LOG_FILE file for read and write.
@@ -181,49 +181,8 @@ for ((i = 0; i < ${#nodes[@]}; i++)); do
 	lastcoo=${arr[$n]}
 done
 
-echo "Distance: $sumdist" >&2
+echo "Distance: $sumdist km" >&2
 
 echo -e "\t\t</trkseg>\n\t</trk>\n</gpx>" >&3
 
-
-echo "Exit 0"
-exit 0
-********************************************************************************
-filename=$(basename -- "$fullfile")
-extension="${filename##*.}"
-filename="${filename%.*}"
-********************************************************************************
-declare -A arr
-arr["key1"]=val1
-arr+=( ["key2"]=val2 ["key3"]=val3 )
-
-for key in ${!arr[@]}; do
-    echo ${key} ${arr[${key}]}
-done
-********************************************************************************
-Reverse
-array=(1 2 3 4 5 6 7)
-
-min=0
-max=$(( ${#array[@]} -1 ))
-
-while [[ min -lt max ]]
-do
-    # Swap current first and last elements
-    x="${array[$min]}"
-    array[$min]="${array[$max]}"
-    array[$max]="$x"
-
-    # Move closer
-    (( min++, max-- ))
-done
-echo "${array[@]}"
-
-********************************************************************************
-	local ref=$(grep -oP '<tag k=\"ref\"(.*) v="\K[^"]*' ${file} | tr -d '\n')
-	local color=$(grep -oP '<tag k=\"colour\"(.*) v="\K[^"]*' ${file} | tr -d '\n')
-	local name=$(grep -oP '<tag k=\"name\"(.*) v="\K[^"]*' ${file} | tr -d '\n')
-local diffTime= $(($(date +%s) - $(date +%s -r ${file})))
-	local date=$(grep -oP '<relation id="'${id}'"(.*) timestamp="\K[^"]*' ${file} | tr -d '\n')
-	date=$(date -d "${date}" +"%F %T")
-
+echo "Create GPX file ${gpxfile}"
