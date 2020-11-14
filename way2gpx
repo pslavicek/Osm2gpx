@@ -56,20 +56,22 @@ fi
 
 osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
 
-echo ${osmfile}
-echo "Extract data"
+echo ${osmfile} >&2
+echo "Extract data" >&2
 
 NODEFILE=$(mktemp) || exit 1
 
 name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+type=$(grep -oP '<tag(.*) k=\"highway\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+colour=$(grep -oP '<tag(.*) colour="\K[^"]*' ${osmfile} | tr -d '\n')
 author=$(grep -oP '<way(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
 wayts=$(grep -oP '<way(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
 
-[ "$name" == "" ] && name=${wayid}
+#[ "$name" == "" ] && name=${wayid}
 
-echo "Extract coordinates"
+echo "Extract coordinates" >&2
 
 grep "<node" ${osmfile} | while read -r line; do
 #	echo "$line"
@@ -100,7 +102,7 @@ lonmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k2 | head -n 1 | cut -d 
 echo -n "0000000000 00.0000000,00.0000000 ${wayts}" >> "${NODEFILE}"
 lastts=$(sort "${NODEFILE}" -r -k 3 | head -n 1 | cut -d ' ' -f 3);
 
-rm -vf ${NODEFILE}
+rm -vf ${NODEFILE} >&2
 
 
 declare -a nodes
@@ -131,33 +133,51 @@ read -r -d '' gpx_head << EOM1
 EOM1
 read -r -d '' gpx_metadata << EOM2
 	<metadata>
+		<name>${name}</name>
+		<desc>${desc}</desc>
+		<time>${lastts}</time>
+		<author>
+			<name>${author}</name>
+		</author>
 		<bounds minlat="${latmin}" maxlat="${latmax}" minlon="${lonmin}" maxlon="${lonmax}"/>
 	</metadata>
 EOM2
 read -r -d '' gpx_trkhead << EOM3
 	<trk>
+		<name/>
 		<src>OpenStreetMap</src>
-		<link href="https://www.openstreetmap.org/way/${wayid}"><text>$name</text></link>
+		<link href="https://www.openstreetmap.org/way/${wayid}"><text>way/${wayid}</text></link>
+		<number>1</number>
+		<type>${type}</type>
 		<trkseg>
 EOM3
 
+colour="green"
 
-echo "Last timestamp="${lastts}
-echo "Name=$name"
-echo "Author=$author"
+if [ "$colour" != "" ]; then
+	cl="\t\t<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour^}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
+	gpx_trkhead=${gpx_trkhead/"<trkseg>"/"${cl}\n<trkseg>"}
+fi;
+
+echo "Last timestamp="${lastts} >&2
+echo "Name=$name" >&2
+echo "Author=$author" >&2
 [ "$desc" != "" ] && echo "Description=$desc"
 
-[ "$author" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>"};
-[ "$lastts" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<time>${lastts}</time>"};
-[ "$desc" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<desc>${desc}</desc>"};
-[ "$name" != "" ] && gpx_metadata=${gpx_metadata/"<metadata>"/"<metadata>\n\t\t<name>${name}</name>"};
 
-[ "${gpxfile}" == "" ] && gpxfile="${wayid}.gpx"
+[ "$name" != "" ] && gpx_trkhead=${gpx_trkhead/"<name/>"/"<name>$name</name>"}
 
-exec 3<&-
-# Open STDOUT as $LOG_FILE file for read and write.
-exec 3<>${gpxfile}
 
+
+
+if [ "${gpxfile}" != "" ]; then
+	gpxfile="${wayid}.gpx"
+	exec 3<&-
+#	Open STDOUT as $LOG_FILE file for read and write.
+	exec 3<>${gpxfile}
+else
+	exec 3>&1
+fi;
 
 echo -e "${gpx_head}" >&3
 echo -e "\t${gpx_metadata}" >&3
@@ -185,4 +205,4 @@ echo "Distance: $sumdist km" >&2
 
 echo -e "\t\t</trkseg>\n\t</trk>\n</gpx>" >&3
 
-echo "Create GPX file ${gpxfile}"
+echo "Create GPX file ${gpxfile}" >&2
