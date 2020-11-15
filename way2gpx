@@ -34,96 +34,31 @@ while [ $# -ne 0 ]; do
 	arg="$1"
 	case "${arg}" in
 		--output|-o)
-			shift
+			shift;
 			gpxfile=$1
 			;;
 		--reverse|-r)
 			reverse=true
 			;;
+		rel*|r*)
+			objectid=${1/"rel"/"r"}
+			objectid=${objectid:1}
+			type="rel"
+			;;
+		way*|w*)
+			objectid=${1/"way"/"w"}
+			objectid=${objectid:1}
+			type="way"
+			;;
 		*)
-			wayid=$1
+			objectid=${1}
+			type="way"
 			;;
 	esac
 	shift
 done
 
-if [ -z "${wayid}" ]; then
-	echo -e "$0 [--reverse|-r] [--output|-o file.gpx] numberofway" >&2
-	echo -e "\tconvert osm way to gpx" >&2
-	echo -e "\tExample: $0 327497062" >&2
-	exit 1;
-fi
-
-osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
-
-echo ${osmfile} >&2
-echo "Extract data" >&2
-
-NODEFILE=$(mktemp) || exit 1
-
-name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
-desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
-note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
-type=$(grep -oP '<tag(.*) k=\"highway\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
-colour=$(grep -oP '<tag(.*) colour="\K[^"]*' ${osmfile} | tr -d '\n')
-author=$(grep -oP '<way(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
-wayts=$(grep -oP '<way(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
-
-#[ "$name" == "" ] && name=${wayid}
-
-echo "Extract coordinates" >&2
-
-grep "<node" ${osmfile} | while read -r line; do
-#	echo "$line"
-	visible=$(echo ${line} | grep -oP '<node(.*) visible="\K[^"]*' | tr -d '\n')
-	[ "${visible}" != "true" ] && continue
-	id=$(echo ${line} | grep -oP '<node(.*) id="\K[^"]*' | tr -d '\n')
-	ts=$(echo ${line} | grep -oP '<node(.*) timestamp="\K[^"]*' | tr -d '\n')
-	lat=$(echo ${line} | grep -oP '<node(.*) lat="\K[^"]*' | tr -d '\n')
-	lon=$(echo ${line} | grep -oP '<node(.*) lon="\K[^"]*' | tr -d '\n')
-	echo "$id $lat,$lon $ts" >> ${NODEFILE}
-done
-
-declare -A arr
-while read -r line; do
-	id=$(echo $line | cut -d ' ' -f1)
-	ll=$(echo $line | cut -d ' ' -f2)
-	arr["${id}"]="$ll"
-done < ${NODEFILE}
-
-
-# Boundary
-latmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k1 | head -n 1 | cut -d ',' -f1)
-latmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k1 | head -n 1 | cut -d ',' -f1)
-lonmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k2 | head -n 1 | cut -d ',' -f2)
-lonmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k2 | head -n 1 | cut -d ',' -f2)
-
-# Zjištění posledního data modifikace nodů nebo cesty
-echo -n "0000000000 00.0000000,00.0000000 ${wayts}" >> "${NODEFILE}"
-lastts=$(sort "${NODEFILE}" -r -k 3 | head -n 1 | cut -d ' ' -f 3);
-
-rm -vf ${NODEFILE} >&2
-
-
-declare -a nodes
-nodes=( `grep -oP '<nd(.*) ref="\K[^"]*' ${osmfile}` )
-
-if [ "$reverse" == "true" ]; then
-	echo "Reverse nodes..."
-	min=0
-	max=$(( ${#nodes[@]} -1 ))
-	while [[ $min -lt $max ]]; do
-		# Swap current first and last elements
-		x="${nodes[$min]}"
-		nodes[$min]="${nodes[$max]}"
-		nodes[$max]="$x"
-
-		# Move closer
-		(( min++, max-- ))
-	done
-fi;
-
-read -r -d '' gpx_head << EOM1
+read -r -d '' gpx_start << EOM1
 <?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
 <gpx version="1.1"
 	creator="way2gpx - https://osm.slavics.cz"
@@ -131,78 +66,177 @@ read -r -d '' gpx_head << EOM1
 	xmlns="http://www.topografix.com/GPX/1/1"
 	xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
 EOM1
-read -r -d '' gpx_metadata << EOM2
-	<metadata>
-		<name>${name}</name>
-		<desc>${desc}</desc>
-		<time>${lastts}</time>
-		<author>
-			<name>${author}</name>
-		</author>
-		<bounds minlat="${latmin}" maxlat="${latmax}" minlon="${lonmin}" maxlon="${lonmax}"/>
-	</metadata>
-EOM2
-read -r -d '' gpx_trkhead << EOM3
-	<trk>
-		<name/>
-		<src>OpenStreetMap</src>
-		<link href="https://www.openstreetmap.org/way/${wayid}"><text>way/${wayid}</text></link>
-		<number>1</number>
-		<type>${type}</type>
-		<trkseg>
-EOM3
 
-colour="green"
+if [ -z "${objectid}" ]; then
+	echo -e "$0 [--reverse|-r] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
+	echo -e "\tconvert osm way to gpx" >&2
+	echo -e "\t--reverse\t-r\t: reverse path (only way)" >&2
+	echo -e "\trel|r\t: numberofobject is relation" >&2
+	echo -e "\tway|w\t: numberofobject is way (default)" >&2
+	echo -e "\nExample\t$0 -r 327119963" >&2
+	echo -e "\t$0 rel6452264" >&2
+	exit 1;
+fi
 
-if [ "$colour" != "" ]; then
-	cl="\t\t<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour^}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
-	gpx_trkhead=${gpx_trkhead/"<trkseg>"/"${cl}\n<trkseg>"}
-fi;
-
-echo "Last timestamp="${lastts} >&2
-echo "Name=$name" >&2
-echo "Author=$author" >&2
-[ "$desc" != "" ] && echo "Description=$desc"
-
-
-[ "$name" != "" ] && gpx_trkhead=${gpx_trkhead/"<name/>"/"<name>$name</name>"}
-
-
-
-
-if [ "${gpxfile}" != "" ]; then
-	gpxfile="${wayid}.gpx"
-	exec 3<&-
-#	Open STDOUT as $LOG_FILE file for read and write.
-	exec 3<>${gpxfile}
-else
-	exec 3>&1
-fi;
-
-echo -e "${gpx_head}" >&3
-echo -e "\t${gpx_metadata}" >&3
-echo -e "\t${gpx_trkhead}" >&3
-
-
-for ((i = 0; i < ${#nodes[@]}; i++)); do
-	n=${nodes[$i]};
-	coo=${arr[$n]};
-#	echo "$i. $n "
-#    <trkpt lat="59.4408327" lon="24.74516185"/>
-	echo -e "\t\t\t<trkpt lat=\"${coo%,*}\" lon=\"${coo##*,}\"/>" >&3
-	
-	if [ $i -eq 0 ]; then
-		sumdist=0;
+function checkColour {
+	local colour=${1,,}
+	colour=${colour^}
+	local arraycolor=(Black DarkRed DarkGreen DarkYellow DarkBlue DarkMagenta DarkCyan LightGray DarkGray Red Green Yellow Blue Magenta Cyan White Transparent)
+	if [[ " ${arraycolor[@]} " =~ " ${colour} " ]]; then
+		echo -e $colour
+		return 0;
 	else
-		dist=$(./distance $lastcoo ${arr[$n]})
-		sumdist=$(echo "$sumdist + $dist" | bc -l)
-		#echo " $dist $sumdist"
+		return 1;
 	fi;
-	lastcoo=${arr[$n]}
-done
+}
 
-echo "Distance: $sumdist km" >&2
+function generateWay {
+	local wayid=$1
+	local gpxfile=$2
+	
+	local osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
 
-echo -e "\t\t</trkseg>\n\t</trk>\n</gpx>" >&3
+	echo "Extract data from ${osmfile}" >&2
 
-echo "Create GPX file ${gpxfile}" >&2
+	local NODEFILE=$(mktemp) || exit 1
+
+	local name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local type1=$(grep -oP '<tag(.*) k=\"highway\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local colour=$(grep -oP '<tag(.*) colour="\K[^"]*' ${osmfile} | tr -d '\n')
+	local author=$(grep -oP '<way(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
+	local wayts=$(grep -oP '<way(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
+
+	#[ "$name" == "" ] && name=${wayid}
+
+	echo "Extract coordinates" >&2
+
+	grep "<node" ${osmfile} | while read -r line; do
+	#	echo "$line"
+		visible=$(echo ${line} | grep -oP '<node(.*) visible="\K[^"]*' | tr -d '\n')
+		[ "${visible}" != "true" ] && continue
+		id=$(echo ${line} | grep -oP '<node(.*) id="\K[^"]*' | tr -d '\n')
+		ts=$(echo ${line} | grep -oP '<node(.*) timestamp="\K[^"]*' | tr -d '\n')
+		lat=$(echo ${line} | grep -oP '<node(.*) lat="\K[^"]*' | tr -d '\n')
+		lon=$(echo ${line} | grep -oP '<node(.*) lon="\K[^"]*' | tr -d '\n')
+		echo "$id $lat,$lon $ts" >> ${NODEFILE}
+	done
+
+	declare -A arr
+	while read -r line; do
+		id=$(echo $line | cut -d ' ' -f1)
+		ll=$(echo $line | cut -d ' ' -f2)
+		arr["${id}"]="$ll"
+	done < ${NODEFILE}
+
+
+	# Boundary
+	local latmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k1 | head -n 1 | cut -d ',' -f1)
+	local latmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k1 | head -n 1 | cut -d ',' -f1)
+	local lonmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k2 | head -n 1 | cut -d ',' -f2)
+	local lonmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k2 | head -n 1 | cut -d ',' -f2)
+
+	# Zjištění posledního data modifikace nodů nebo cesty
+	echo -n "0000000000 00.0000000,00.0000000 ${wayts}" >> "${NODEFILE}"
+	local lastts=$(sort "${NODEFILE}" -r -k 3 | head -n 1 | cut -d ' ' -f 3);
+
+	rm -vf ${NODEFILE} >&2
+
+	declare -a nodes
+	local nodes=( `grep -oP '<nd(.*) ref="\K[^"]*' ${osmfile}` )
+
+	if [ "$reverse" == "true" ]; then
+		echo "Reverse nodes..."
+		min=0
+		max=$(( ${#nodes[@]} -1 ))
+		while [[ $min -lt $max ]]; do
+			# Swap current first and last elements
+			x="${nodes[$min]}"
+			nodes[$min]="${nodes[$max]}"
+			nodes[$max]="$x"
+
+			# Move closer
+			(( min++, max-- ))
+		done
+	fi;
+
+	echo "Last timestamp="${lastts} >&2
+	echo "Name=$name" >&2
+	echo "Author=$author" >&2
+	[ "$desc" != "" ] && echo "Description: $desc"
+	[ "$note" != "" ] && echo "Note: $note"
+	
+
+	local gpx_metadata="\t<metadata>\n\t</metadata>"
+	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
+	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
+	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
+	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
+
+	gpx_trkhead="<trk>"
+	[ "$name" != "" ] && gpx_trkhead="${gpx_trkhead}\n\t\t<name>$name</name>"
+	gpx_trkhead="${gpx_trkhead}\n\t\t<src>OpenStreetMap</src>"
+	gpx_trkhead="${gpx_trkhead}\n\t\t<link href=\"https://www.openstreetmap.org/way/${wayid}\"><text>Way ${wayid}</text></link>"
+	gpx_trkhead="${gpx_trkhead}\n\t\t<type>${type1}</type>"
+		
+	colour=$(checkColour ${colour})
+	if [ $? -eq 0 ]; then
+		echo "Set color: ${colour}" >&2
+		gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
+	fi;
+	if [ "${gpxfile}" != "" ]; then
+		#gpxfile="${wayid}.gpx"
+		echo "GPX to file> '${gpxfile}'" >&2
+		exec 3<&-
+	#	Open STDOUT as $LOG_FILE file for read and write.
+		exec 3<>${gpxfile}
+		echo "Create GPX file ${gpxfile}" >&2
+	else
+		exec 3>&1
+	fi;
+
+	echo -e "${gpx_start}" >&3
+	echo -e "${gpx_metadata}" >&3
+	echo -e "\t${gpx_trkhead}" >&3
+	echo -e "\t\t<trkseg>" >&3
+
+	for ((i = 0; i < ${#nodes[@]}; i++)); do
+		n=${nodes[$i]};
+		coo=${arr[$n]};
+	#	echo "$i. $n "
+	#    <trkpt lat="59.4408327" lon="24.74516185"/>
+		echo -e "\t\t\t<trkpt lat=\"${coo%,*}\" lon=\"${coo##*,}\"/>" >&3
+		
+		if [ $i -eq 0 ]; then
+			sumdist=0;
+		else
+			dist=$(./distance $lastcoo ${arr[$n]})
+			sumdist=$(echo "$sumdist + $dist" | bc -l)
+			#echo " $dist $sumdist"
+		fi;
+		lastcoo=${arr[$n]}
+	done
+	echo -e "\t\t</trkseg>" >&3
+	echo -e "\t</trk>" >&3
+	echo -e "</gpx>" >&3
+	echo "Distance: $sumdist km" >&2
+	[ "${gpxfile}" != "" ] && exec 3<&-
+	[ "${gpxfile}" != "" ] && echo -n "${gpxfile}" >&2
+}
+
+if [ "${type}" == "rel" ]; then
+	echo "Generate relation id=${objectid}" >&2
+else
+	echo "generateWay ${objectid} ${gpxfile:-${objectid}.gpx}" >&2
+	output=$(generateWay ${objectid} ${gpxfile:-${objectid}.gpx})
+	echo ${output}
+	[[ -e ${gpxfile:-${objectid}.gpx} ]] && echo xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile:-${objectid}.gpx}
+fi;
+
+
+
+
+
+
