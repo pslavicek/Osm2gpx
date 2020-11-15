@@ -92,8 +92,7 @@ function checkColour {
 
 function generateWay {
 	local wayid=$1
-	local gpxfile=$2
-	
+
 	local osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
 
 	echo "Extract data from ${osmfile}" >&2
@@ -170,9 +169,9 @@ function generateWay {
 
 	local gpx_metadata="\t<metadata>\n\t</metadata>"
 	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
+	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
-	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
 	gpx_trkhead="<trk>"
@@ -186,28 +185,18 @@ function generateWay {
 		echo "Set color: ${colour}" >&2
 		gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
 	fi;
-	if [ "${gpxfile}" != "" ]; then
-		#gpxfile="${wayid}.gpx"
-		echo "GPX to file> '${gpxfile}'" >&2
-		exec 3<&-
-	#	Open STDOUT as $LOG_FILE file for read and write.
-		exec 3<>${gpxfile}
-		echo "Create GPX file ${gpxfile}" >&2
-	else
-		exec 3>&1
-	fi;
 
-	echo -e "${gpx_start}" >&3
-	echo -e "${gpx_metadata}" >&3
-	echo -e "\t${gpx_trkhead}" >&3
-	echo -e "\t\t<trkseg>" >&3
+	echo -e "${gpx_start}" 
+	echo -e "${gpx_metadata}"
+	echo -e "\t${gpx_trkhead}"
+	echo -e "\t\t<trkseg>"
 
 	for ((i = 0; i < ${#nodes[@]}; i++)); do
 		n=${nodes[$i]};
 		coo=${arr[$n]};
 	#	echo "$i. $n "
 	#    <trkpt lat="59.4408327" lon="24.74516185"/>
-		echo -e "\t\t\t<trkpt lat=\"${coo%,*}\" lon=\"${coo##*,}\"/>" >&3
+		echo -e "\t\t\t<trkpt lat=\"${coo%,*}\" lon=\"${coo##*,}\"/>"
 		
 		if [ $i -eq 0 ]; then
 			sumdist=0;
@@ -218,21 +207,36 @@ function generateWay {
 		fi;
 		lastcoo=${arr[$n]}
 	done
-	echo -e "\t\t</trkseg>" >&3
-	echo -e "\t</trk>" >&3
-	echo -e "</gpx>" >&3
+	echo -e "\t\t</trkseg>"
+	echo -e "\t</trk>"
+	echo -e "</gpx>"
 	echo "Distance: $sumdist km" >&2
-	[ "${gpxfile}" != "" ] && exec 3<&-
-	[ "${gpxfile}" != "" ] && echo -n "${gpxfile}" >&2
 }
 
 if [ "${type}" == "rel" ]; then
 	echo "Generate relation id=${objectid}" >&2
 else
-	echo "generateWay ${objectid} ${gpxfile:-${objectid}.gpx}" >&2
-	output=$(generateWay ${objectid} ${gpxfile:-${objectid}.gpx})
-	echo ${output}
-	[[ -e ${gpxfile:-${objectid}.gpx} ]] && echo xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile:-${objectid}.gpx}
+	echo "generateWay ${objectid}" >&2
+	if [ "${gpxfile}" != "" ]; then
+		generateWay ${objectid} > ${gpxfile}
+		echo "Created GPX file ${gpxfile}"
+		if [ ! command -v xmllint &> /dev/null ]; then
+			echo -e "Validation program xmllint not found.\n\tsudo apt install xmllint" >&2
+		else
+			xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile}
+		fi;
+		#gpxfile="${wayid}.gpx"
+#		echo "GPX to file> '${gpxfile}'" >&2
+#		exec 3<&-
+	#	Open STDOUT as $LOG_FILE file for read and write.
+#		exec 3<>${gpxfile}
+#		echo "Create GPX file ${gpxfile}" >&2
+	else
+		generateWay ${objectid}
+	fi;
+	
+	
+	
 fi;
 
 
