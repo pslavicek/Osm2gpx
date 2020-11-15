@@ -90,8 +90,22 @@ function checkColour {
 	fi;
 }
 
+function getBoundary {
+	local file=$1
+
+	# Boundary
+	cut -d ' ' -f2 "${file}" | sort -t ',' -k1 | head -n 1 | cut -d ',' -f1
+	cut -d ' ' -f2 "${file}" | sort -r -t ',' -k1 | head -n 1 | cut -d ',' -f1
+	cut -d ' ' -f2 "${file}" | sort -t ',' -k2 | head -n 1 | cut -d ',' -f2
+	cut -d ' ' -f2 "${file}" | sort -r -t ',' -k2 | head -n 1 | cut -d ',' -f2
+
+	# Last Timestamp
+	sort "${file}" -r -k 3 | head -n 1 | cut -d ' ' -f 3
+}
+
 function generateWay {
 	local wayid=$1
+	local isReverse=$2
 
 	local osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
 
@@ -122,30 +136,25 @@ function generateWay {
 		echo "$id $lat,$lon $ts" >> ${NODEFILE}
 	done
 
-	declare -A arr
+	declare -A coordinates
 	while read -r line; do
 		id=$(echo $line | cut -d ' ' -f1)
 		ll=$(echo $line | cut -d ' ' -f2)
-		arr["${id}"]="$ll"
+		coordinates["${id}"]="$ll"
 	done < ${NODEFILE}
 
+	local latmin latmax lonmin lonmax lastts
+	read -r -d '' latmin latmax lonmin lonmax lastts <<< $(getBoundary ${NODEFILE} )
+	#echo $latmin $latmax $lonmin $lonmax $lastts
 
-	# Boundary
-	local latmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k1 | head -n 1 | cut -d ',' -f1)
-	local latmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k1 | head -n 1 | cut -d ',' -f1)
-	local lonmin=$(cut -d ' ' -f2 "${NODEFILE}" | sort -t ',' -k2 | head -n 1 | cut -d ',' -f2)
-	local lonmax=$(cut -d ' ' -f2 "${NODEFILE}" | sort -r -t ',' -k2 | head -n 1 | cut -d ',' -f2)
-
-	# Zjištění posledního data modifikace nodů nebo cesty
-	echo -n "0000000000 00.0000000,00.0000000 ${wayts}" >> "${NODEFILE}"
-	local lastts=$(sort "${NODEFILE}" -r -k 3 | head -n 1 | cut -d ' ' -f 3);
+	lastts=$(echo -e "${lastts}\n${wayts}" | sort -r | head -n 1)
 
 	rm -vf ${NODEFILE} >&2
 
 	declare -a nodes
 	local nodes=( `grep -oP '<nd(.*) ref="\K[^"]*' ${osmfile}` )
 
-	if [ "$reverse" == "true" ]; then
+	if [ "$isReverse" == "true" ]; then
 		echo "Reverse nodes..."
 		min=0
 		max=$(( ${#nodes[@]} -1 ))
@@ -154,7 +163,6 @@ function generateWay {
 			x="${nodes[$min]}"
 			nodes[$min]="${nodes[$max]}"
 			nodes[$max]="$x"
-
 			# Move closer
 			(( min++, max-- ))
 		done
@@ -166,11 +174,12 @@ function generateWay {
 	[ "$desc" != "" ] && echo "Description: $desc"
 	[ "$note" != "" ] && echo "Note: $note"
 	
-
+	local year=$(date +%Y)
 	local gpx_metadata="\t<metadata>\n\t</metadata>"
 	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
-	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
+	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"${author}\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
@@ -193,19 +202,15 @@ function generateWay {
 
 	for ((i = 0; i < ${#nodes[@]}; i++)); do
 		n=${nodes[$i]};
-		coo=${arr[$n]};
-	#	echo "$i. $n "
-	#    <trkpt lat="59.4408327" lon="24.74516185"/>
-		echo -e "\t\t\t<trkpt lat=\"${coo%,*}\" lon=\"${coo##*,}\"/>"
+		coordinate=${coordinates[$n]};
+		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>"
 		
-		if [ $i -eq 0 ]; then
-			sumdist=0;
-		else
-			dist=$(./distance $lastcoo ${arr[$n]})
-			sumdist=$(echo "$sumdist + $dist" | bc -l)
+		if [ $i -ne 0 ]; then
+			dist=$(./distance $lastcoo ${coordinates[$n]})
+			sumdist=$(echo "${sumdist:-0} + $dist" | bc -l)
 			#echo " $dist $sumdist"
 		fi;
-		lastcoo=${arr[$n]}
+		lastcoo=${coordinate}
 	done
 	echo -e "\t\t</trkseg>"
 	echo -e "\t</trk>"
@@ -218,12 +223,12 @@ if [ "${type}" == "rel" ]; then
 else
 	echo "generateWay ${objectid}" >&2
 	if [ "${gpxfile}" != "" ]; then
-		generateWay ${objectid} > ${gpxfile}
+		generateWay ${objectid} ${reverse} > ${gpxfile}
 		echo "Created GPX file ${gpxfile}"
 		if [ ! command -v xmllint &> /dev/null ]; then
 			echo -e "Validation program xmllint not found.\n\tsudo apt install xmllint" >&2
 		else
-			xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile}
+			xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile} || echo "Bad validation!" >&2
 		fi;
 		#gpxfile="${wayid}.gpx"
 #		echo "GPX to file> '${gpxfile}'" >&2
@@ -232,7 +237,7 @@ else
 #		exec 3<>${gpxfile}
 #		echo "Create GPX file ${gpxfile}" >&2
 	else
-		generateWay ${objectid}
+		generateWay ${objectid} ${reverse}
 	fi;
 	
 	
