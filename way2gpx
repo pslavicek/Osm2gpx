@@ -8,8 +8,18 @@
 
 osmurl="https://www.openstreetmap.org/api/0.6"
 #TMPDIR=$(mktemp -d) || exit 1
-TMPDIR="/tmp"
+TMPDIR="/tmp/way2gpx"
 #echo "Our temp file is ${TMPDIR}"
+
+function distance () {
+	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
+	local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
+        local dlon=`bc -l <<< "(${2##*,} - ${1##*,}) * 0.01745329251994329444"`
+	local distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
+	distance=$(bc -l <<<"1.5707963267948965 - a($distance / sqrt(1 - $distance * $distance))")
+	distance=$(bc -l <<<"scale=4; ($distance * 6371 + 0.00005) / 1")
+	echo $distance | awk '{printf "%1.4f\n", $1}'
+}
 
 function downloadOsmPart {
 	local file="${TMPDIR}/${1}.xml"
@@ -40,6 +50,9 @@ while [ $# -ne 0 ]; do
 		--reverse|-r)
 			reverse=true
 			;;
+		--validate|-v)
+			validate=true
+			;;
 		rel*|r*)
 			objectid=${1/"rel"/"r"}
 			objectid=${objectid:1}
@@ -68,9 +81,11 @@ read -r -d '' gpx_start << EOM1
 EOM1
 
 if [ -z "${objectid}" ]; then
-	echo -e "$0 [--reverse|-r] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
+	echo -e "$0 [--reverse|-r] [--output[v]|-o[v] file.gpx] [rel|r][way|w]numberofobject" >&2
 	echo -e "\tconvert osm way to gpx" >&2
-	echo -e "\t--reverse\t-r\t: reverse path (only way)" >&2
+	echo -e "\t--reverse|-r\t: reverse path (only way)" >&2
+	echo -e "\t--output|-o gpxfile\t: export to file" >&2
+	echo -e "\t--outputv|-ov gpxfile\t: export to file with GPX validation" >&2
 	echo -e "\trel|r\t: numberofobject is relation" >&2
 	echo -e "\tway|w\t: numberofobject is way (default)" >&2
 	echo -e "\nExample\t$0 -r 327119963" >&2
@@ -78,7 +93,7 @@ if [ -z "${objectid}" ]; then
 	exit 1;
 fi
 
-function checkColour {
+function checkGarminColour {
 	local colour=${1,,}
 	colour=${colour^}
 	local arraycolor=(Black DarkRed DarkGreen DarkYellow DarkBlue DarkMagenta DarkCyan LightGray DarkGray Red Green Yellow Blue Magenta Cyan White Transparent)
@@ -189,7 +204,7 @@ function generateWay {
 	gpx_trkhead="${gpx_trkhead}\n\t\t<link href=\"https://www.openstreetmap.org/way/${wayid}\"><text>Way ${wayid}</text></link>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<type>${type1}</type>"
 		
-	colour=$(checkColour ${colour})
+	colour=$(checkGarminColour ${colour})
 	if [ $? -eq 0 ]; then
 		echo "Set color: ${colour}" >&2
 		gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
@@ -206,7 +221,7 @@ function generateWay {
 		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>"
 		
 		if [ $i -ne 0 ]; then
-			dist=$(./distance $lastcoo ${coordinates[$n]})
+			dist=$(distance $lastcoo ${coordinates[$n]})
 			sumdist=$(echo "${sumdist:-0} + $dist" | bc -l)
 			#echo " $dist $sumdist"
 		fi;
@@ -225,10 +240,12 @@ else
 	if [ "${gpxfile}" != "" ]; then
 		generateWay ${objectid} ${reverse} > ${gpxfile}
 		echo "Created GPX file ${gpxfile}"
-		if [ ! command -v xmllint &> /dev/null ]; then
-			echo -e "Validation program xmllint not found.\n\tsudo apt install xmllint" >&2
-		else
-			xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile} || echo "Bad validation!" >&2
+		if [ "${validation}" == "true" ]; then
+			if [ ! command -v xmllint &> /dev/null ]; then
+				echo -e "Validation program xmllint not found.\n\tsudo apt install xmllint" >&2
+			else
+				xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile} || echo "Bad validation!" >&2
+			fi;
 		fi;
 		#gpxfile="${wayid}.gpx"
 #		echo "GPX to file> '${gpxfile}'" >&2
