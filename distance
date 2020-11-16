@@ -4,17 +4,17 @@ function distance () {
 	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
 	local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
         local dlon=`bc -l <<< "(${2##*,} - ${1##*,}) * 0.01745329251994329444"`
-	
 	local distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
 	distance=$(bc -l <<<"1.5707963267948965 - a($distance / sqrt(1 - $distance * $distance))")
-	distance=$(bc -l <<< "$distance * 6371")
-	distance=$(bc -l <<<"scale=4; ($distance+0.00005) / 1")
-
+	distance=$(bc -l <<<"scale=4; ($distance * 6371 + 0.00005) / 1")
         echo $distance
 }
 
 if [ $# -ne 2 ]; then
-	echo "$0 lat1,lon1 lat2,lon2" >&2
+	echo -e "Usage: $0 lat1,lon1 lat2,lon2" >&2
+	echo -e "\tcompute distance in km between coordinates" >&2
+	echo -e "\tExample:\n\t\t$0 50.4120222,14.5683550 50.4209669,14.5714100" >&2
+	echo -e "\t\t1.0179" >&2
 	exit 1;
 fi;
 
