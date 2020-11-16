@@ -1,25 +1,14 @@
 #!/bin/bash
 
 function distance () {
-	local PI="3.141592653589793"
-	local ER=6371;
-        lat1="${1%,*}"
-        lon1="${1##*,}"
-        lat2="${2%,*}"
-        lon2="${2##*,}"
-
-        lat1=$(bc -l <<< "$lat1 * $pi/180")
-        lon1=$(bc -l <<< "$lon1 * $pi/180")
-        lat2=$(bc -l <<< "$lat2 * $pi/180")
-        lon2=$(bc -l <<< "$lon2 * $pi/180")
-
-        dlat=`bc -l <<< "$lat2 - $lat1"`
-        dlon=`bc -l <<< "$lon2 - $lon1"`
+	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
+	local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
+        local dlon=`bc -l <<< "(${2##*,} - ${1##*,}) * 0.01745329251994329444"`
 	
-	distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
-	distance=$(bc -l <<<"$pi / 2 - a($distance / sqrt(1 - $distance * $distance))")
-	distance=$(bc -l <<< "$distance * $ER")
-	distance=$(bc <<<"scale=4; $distance / 1")
+	local distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
+	distance=$(bc -l <<<"1.5707963267948965 - a($distance / sqrt(1 - $distance * $distance))")
+	distance=$(bc -l <<< "$distance * 6371")
+	distance=$(bc -l <<<"scale=4; ($distance+0.00005) / 1")
 
         echo $distance
 }
