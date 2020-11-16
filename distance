@@ -7,7 +7,7 @@ function distance () {
 	local distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
 	distance=$(bc -l <<<"1.5707963267948965 - a($distance / sqrt(1 - $distance * $distance))")
 	distance=$(bc -l <<<"scale=4; ($distance * 6371 + 0.00005) / 1")
-        echo $distance
+	echo $distance | awk '{printf "%1.4f\n", $1}'
 }
 
 if [ $# -ne 2 ]; then
