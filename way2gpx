@@ -27,7 +27,7 @@ function downloadOsmPart {
 	[ -d ${file%/*} ] || mkdir -p ${file%/*}
 	
 	if [ ! -e ${file} ]; then
-        	echo "Download ... "${1} >&2
+        	echo "Download ... ${osmurl}/${1}" >&2
 		curl --silent "${osmurl}/${1}" -o ${file}
 	        local status=$?
 		[ -e ${file} ] || status=1;
@@ -123,7 +123,7 @@ function getBoundary {
 function generateWay {
 	local wayid=$1
 	local isReverse=$2
-
+	isReverse=${isReverse/"backward"/"true"}
 	local osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
 
 	echo "Extract data from ${osmfile}" >&2
@@ -160,9 +160,10 @@ function generateWay {
 		coordinates["${id}"]="$ll"
 	done < ${NODEFILE}
 
+	echo "Check boundary" >&2
 	local latmin latmax lonmin lonmax lastts
 	read -r -d '' latmin latmax lonmin lonmax lastts <<< $(getBoundary ${NODEFILE} )
-	#echo $latmin $latmax $lonmin $lonmax $lastts
+	#echo $latmin $latmax $lonmin $lonmax $lastts >&2
 
 	lastts=$(echo -e "${lastts}\n${wayts}" | sort -r | head -n 1)
 
@@ -172,7 +173,7 @@ function generateWay {
 	local nodes=( `grep -oP '<nd(.*) ref="\K[^"]*' ${osmfile}` )
 
 	if [ "$isReverse" == "true" ]; then
-		echo "Reverse nodes..."
+		echo "Reverse nodes..." >&2
 		min=0
 		max=$(( ${#nodes[@]} -1 ))
 		while [[ $min -lt $max ]]; do
@@ -232,13 +233,44 @@ function generateWay {
 	echo -e "\t\t</trkseg>"
 	echo -e "\t</trk>"
 	echo -e "</gpx>"
-	echo "Distance: $sumdist km" >&2
+	echo $sumdist | awk '{printf "Distance %1.4f km\n", $1}' >&2
+
+}
+
+function generateRelation {
+	local relid=$1
+	local osmfile=$(downloadOsmPart relation/${relid} || exit $?)
+
+	echo "Extract ways from ${osmfile}" >&2
+	local WAYSFILE=$(mktemp) || exit 1
+	grep '<member.*type=\"way\".*ref=' ${osmfile} > ${WAYSFILE}
+#	declare -A ways
+	ways=()
+	[ -d "${TMPDIR}/gpx" ] || mkdir -p "${TMPDIR}/gpx" || exit 1
+	while read -r line; do
+		echo "$line"
+		wid=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) ref="\K[^"]*')
+		role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
+		generateWay ${wid} ${role} > "${TMPDIR}/gpx/${wid}.gpx"
+		echo "GPX: ${TMPDIR}/gpx/${wid}.gpx" >&2
+		#cat "${TMPDIR}/gpx/${wid}.gpx"
+		ways+=("$wid")
+	done < ${WAYSFILE}
+	rm -vf ${WAYSFILE} >&2
+	
+	for id in "${ways[@]}"; do
+		echo $id >&2
+		#find 1. <trkseg>
+		grep "<trkseg" "${TMPDIR}/gpx/${wid}.gpx" >&2
+	done
+
 }
 
 if [ "${type}" == "rel" ]; then
 	echo "Generate relation id=${objectid}" >&2
+	generateRelation ${objectid}
 else
-	echo "generateWay ${objectid}" >&2
+	echo "Generate way id=${objectid}" >&2
 	if [ "${gpxfile}" != "" ]; then
 		generateWay ${objectid} ${reverse} > ${gpxfile}
 		echo "Created GPX file ${gpxfile}"
