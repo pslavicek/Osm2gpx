@@ -1,35 +1,24 @@
 #!/bin/bash
-pi="3.141592653589793"
 
-deg2rad () {
-        bc -l <<< "scale=12; $1 * $pi/180"
-}
-
-rad2deg () {
-        bc -l <<< "scale=12; $1 * 180/$pi"
-}
-
-acos () {
-        bc -l <<<"scale=12; $pi / 2 - a($1 / sqrt(1 - $1 * $1))"
-}
-
-distance () {
+function distance () {
+	local PI="3.141592653589793"
+	local ER=6371;
         lat1="${1%,*}"
         lon1="${1##*,}"
         lat2="${2%,*}"
         lon2="${2##*,}"
 
-        lat1="`deg2rad $lat1`"
-        lon1="`deg2rad $lon1`"
-        lat2="`deg2rad $lat2`"
-        lon2="`deg2rad $lon2`"
+        lat1=$(bc -l <<< "$lat1 * $pi/180")
+        lon1=$(bc -l <<< "$lon1 * $pi/180")
+        lat2=$(bc -l <<< "$lat2 * $pi/180")
+        lon2=$(bc -l <<< "$lon2 * $pi/180")
 
         dlat=`bc -l <<< "$lat2 - $lat1"`
         dlon=`bc -l <<< "$lon2 - $lon1"`
 	
 	distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
-	distance=$(acos "$distance")
-	distance=$(bc -l <<< "scale=12; $distance * 6371")
+	distance=$(bc -l <<<"$pi / 2 - a($distance / sqrt(1 - $distance * $distance))")
+	distance=$(bc -l <<< "$distance * $ER")
 	distance=$(bc <<<"scale=4; $distance / 1")
 
         echo $distance
