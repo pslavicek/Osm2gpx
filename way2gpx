@@ -47,11 +47,13 @@ while [ $# -ne 0 ]; do
 			shift;
 			gpxfile=$1
 			;;
+		--outputv|-ov)
+			shift;
+			gpxfile=$1
+			validate=true
+			;;
 		--reverse|-r)
 			reverse=true
-			;;
-		--validate|-v)
-			validate=true
 			;;
 		rel*|r*)
 			objectid=${1/"rel"/"r"}
@@ -240,12 +242,8 @@ else
 	if [ "${gpxfile}" != "" ]; then
 		generateWay ${objectid} ${reverse} > ${gpxfile}
 		echo "Created GPX file ${gpxfile}"
-		if [ "${validation}" == "true" ]; then
-			if [ ! command -v xmllint &> /dev/null ]; then
-				echo -e "Validation program xmllint not found.\n\tsudo apt install xmllint" >&2
-			else
+		if [ "${validate}" == "true" ]; then
 				xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile} || echo "Bad validation!" >&2
-			fi;
 		fi;
 		#gpxfile="${wayid}.gpx"
 #		echo "GPX to file> '${gpxfile}'" >&2
