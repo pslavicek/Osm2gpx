@@ -187,10 +187,10 @@ function generateWay {
 	fi;
 
 	echo "Last timestamp="${lastts} >&2
-	echo "Name=$name" >&2
-	echo "Author=$author" >&2
-	[ "$desc" != "" ] && echo "Description: $desc"
-	[ "$note" != "" ] && echo "Note: $note"
+#	echo "Name=$name" >&2
+#	echo "Author=$author" >&2
+#	[ "$desc" != "" ] && echo "Description: $desc"
+#	[ "$note" != "" ] && echo "Note: $note"
 	
 	local year=$(date +%Y)
 	local gpx_metadata="\t<metadata>\n\t</metadata>"
@@ -251,19 +251,33 @@ function generateRelation {
 		echo "$line"
 		wid=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) ref="\K[^"]*')
 		role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
-		generateWay ${wid} ${role} > "${TMPDIR}/gpx/${wid}.gpx"
+		[ ! -e "${TMPDIR}/gpx/${wid}-${role}.gpx" ] && generateWay ${wid} ${role} > "${TMPDIR}/gpx/${wid}-${role}.gpx"
 		echo "GPX: ${TMPDIR}/gpx/${wid}.gpx" >&2
 		#cat "${TMPDIR}/gpx/${wid}.gpx"
-		ways+=("$wid")
+		ways+=("${TMPDIR}/gpx/${wid}-${role}.gpx")
 	done < ${WAYSFILE}
-	rm -vf ${WAYSFILE} >&2
+	rm -vf ${WAYSFILE} >&2 
 	
-	for id in "${ways[@]}"; do
-		echo $id >&2
-		#find 1. <trkseg>
-		grep "<trkseg" "${TMPDIR}/gpx/${wid}.gpx" >&2
+	echo "$gpx_start" > "${relid}.gpx"
+	local trktsnum=0;
+	
+	ts=0;
+	for widfile in "${ways[@]}"; do
+		echo "Extract <time> from ${widfile}" >&2
+		tsdate=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep "<time>" | sed -e "s/<time>\(.*\)<\/time>/\1/")
+		tsnum=$(date -d $tsdate +%s);
+		[ $ts -lt $tsnum ] && ts=$tsnum;
+		# min lon,lan max lon,lan
 	done
+	echo "Max date "` TZ='Z' date --date="@$ts" +'%FT%X%ZZ'`
 
+	
+	for widfile in "${ways[@]}"; do
+		echo "Extract <trk> from ${widfile}" >&2
+		sed -n "/<trk/,/<\/trk>/p" "${widfile}" >> "${relid}.gpx"
+	done
+	echo "</gpx>" >> "${relid}.gpx"
+	echo "${relid}.gpx"
 }
 
 if [ "${type}" == "rel" ]; then
