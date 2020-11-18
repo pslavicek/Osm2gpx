@@ -21,6 +21,11 @@ function distance () {
 	echo $distance | awk '{printf "%1.4f\n", $1}'
 }
 
+function addFloat {
+	num=$(bc -l <<<"scale=4; ($1 + $2)")
+	echo $num | awk '{printf "%1.4f\n", $1}'
+}
+
 function downloadOsmPart {
 	local file="${TMPDIR}/${1}.xml"
 	file=${file/\/full/-full}
@@ -134,7 +139,8 @@ function generateWay {
 	local desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local type1=$(grep -oP '<tag(.*) k=\"highway\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
-	local colour=$(grep -oP '<tag(.*) colour="\K[^"]*' ${osmfile} | tr -d '\n')
+	local website=$(grep -oP '<tag(.*) k=\"website\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local colour=$(grep -oP '<tag(.*) k=\"colour\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local author=$(grep -oP '<way(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
 	local wayts=$(grep -oP '<way(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
 
@@ -198,13 +204,14 @@ function generateWay {
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
 	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"${author}\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
+	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
 	gpx_trkhead="<trk>"
 	[ "$name" != "" ] && gpx_trkhead="${gpx_trkhead}\n\t\t<name>$name</name>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<src>OpenStreetMap</src>"
-	gpx_trkhead="${gpx_trkhead}\n\t\t<link href=\"https://www.openstreetmap.org/way/${wayid}\"><text>Way ${wayid}</text></link>"
+	gpx_trkhead="${gpx_trkhead}\n\t\t<link href=\"https://www.openstreetmap.org/way/${wayid}\"><text>${wayid}</text></link>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<type>${type1}</type>"
 		
 	colour=$(checkGarminColour ${colour})
@@ -241,6 +248,15 @@ function generateRelation {
 	local relid=$1
 	local osmfile=$(downloadOsmPart relation/${relid} || exit $?)
 
+	local name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local website=$(grep -oP '<tag(.*) k=\"website\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local colour=$(grep -oP '<tag(.*) k=\"colour\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local distance=$(grep -oP '<tag(.*) k=\"distance\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local author=$(grep -oP '<rel(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
+	local relts=$(grep -oP '<rel(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
+
 	echo "Extract ways from ${osmfile}" >&2
 	local WAYSFILE=$(mktemp) || exit 1
 	grep '<member.*type=\"way\".*ref=' ${osmfile} > ${WAYSFILE}
@@ -248,35 +264,101 @@ function generateRelation {
 	ways=()
 	[ -d "${TMPDIR}/gpx" ] || mkdir -p "${TMPDIR}/gpx" || exit 1
 	while read -r line; do
-		echo "$line"
+		#echo "$line"
 		wid=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) ref="\K[^"]*')
 		role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
 		[ ! -e "${TMPDIR}/gpx/${wid}-${role}.gpx" ] && generateWay ${wid} ${role} > "${TMPDIR}/gpx/${wid}-${role}.gpx"
-		echo "GPX: ${TMPDIR}/gpx/${wid}.gpx" >&2
+		#echo "GPX: ${TMPDIR}/gpx/${wid}.gpx" >&2
 		#cat "${TMPDIR}/gpx/${wid}.gpx"
 		ways+=("${TMPDIR}/gpx/${wid}-${role}.gpx")
 	done < ${WAYSFILE}
 	rm -vf ${WAYSFILE} >&2 
 	
-	echo "$gpx_start" > "${relid}.gpx"
-	local trktsnum=0;
-	
-	ts=0;
+	local RELFILE=$(mktemp) || exit 1
 	for widfile in "${ways[@]}"; do
-		echo "Extract <time> from ${widfile}" >&2
-		tsdate=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep "<time>" | sed -e "s/<time>\(.*\)<\/time>/\1/")
-		tsnum=$(date -d $tsdate +%s);
-		[ $ts -lt $tsnum ] && ts=$tsnum;
-		# min lon,lan max lon,lan
+		#echo "Extract <time> from ${widfile}" >&2
+		ts=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep "<time>" | sed -e "s/<time>\(.*\)<\/time>/\1/" | tr -d '\t')
+		#<bounds minlat="50.4102420" maxlat="50.4117190" minlon="14.5725041" maxlon="14.5754772"/>
+		minlat=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) minlat="\K[^"]*')
+		maxlat=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) maxlat="\K[^"]*')
+		minlon=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) minlon="\K[^"]*')
+		maxlon=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) maxlon="\K[^"]*')
+		echo "${widfile##*\/} ${minlat},${minlon} ${ts}" >> ${RELFILE} 
+		echo "${widfile##*\/} ${maxlat},${maxlon} ${ts}" >> ${RELFILE} 
 	done
-	echo "Max date "` TZ='Z' date --date="@$ts" +'%FT%X%ZZ'`
+	#echo "Max date "` TZ='Z' date --date="@$ts" +'%FT%X%ZZ'`
+	read -r -d '' latmin latmax lonmin lonmax lastts <<< $(getBoundary ${RELFILE} )
+	rm ${RELFILE} >&2
+	lastts=$(echo -e "${lastts}\n${relts}" | sort -r | head -n 1)
+	echo "Last update "`date -d "${lastts}" +"%F %T %Z"` >&2
+	local year=$(date +%Y)
+	local gpx_metadata="\t<metadata>\n\t</metadata>"
+	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
+	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
+	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"${author}\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
+	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
+	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
+	[ "${name}" != "" ] && echo "Name: " >&2
+	colour=$(checkGarminColour ${colour})
+	if [ $? -eq 0 ]; then
+		echo "Color: ${colour}" >&2
+		extension="<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
+#		gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t${extension}\n\t</metadata>"}
+	fi;
 
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
+
+
+	echo -e "${gpx_start}" > "${relid}.gpx"
+	echo -e "${gpx_metadata}" >> "${relid}.gpx"
 	
+	
+	echo -e "\t<trk>" >> "${relid}.gpx"
+	[ "${name}" != "" ] && echo -e "\t\t<name>${name}</name>" >> "${relid}.gpx"
+	[ "${note}" != "" ] && echo -e "\t\t<cmt>${note}</cmt>" >> "${relid}.gpx"
+	[ "${desc}" != "" ] && echo -e "\t\t<desc>${desc}</desc>" >> "${relid}.gpx"
+	echo -e "\t\t<src>OpenStreetMap</src>" >> "${relid}.gpx"
+	echo -e "\t\t<link href=\"https://www.openstreetmap.org/relation/${relid}\"><text>${relid}</text></link>" >> "${relid}.gpx"
+	echo -e "\t\t<number>${relid}</number>" >> "${relid}.gpx"
+	echo -e "\t\t<type>path</type>" >> "${relid}.gpx"
+	[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> "${relid}.gpx"
 	for widfile in "${ways[@]}"; do
-		echo "Extract <trk> from ${widfile}" >&2
-		sed -n "/<trk/,/<\/trk>/p" "${widfile}" >> "${relid}.gpx"
+#		echo "Extract <trkseg> from ${widfile}" >&2
+		sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}" >> "${relid}.gpx"
 	done
+	echo -e "\t</trk>" >> "${relid}.gpx"
 	echo "</gpx>" >> "${relid}.gpx"
+	
+	# Check distance
+	masterdist=0
+	c=0
+	for widfile in "${ways[@]}"; do
+	while IFS= read -r line; do
+#		echo "line '${line}'"
+		if [[ $line == *"<trkpt"* ]]; then
+			lat=$(echo ${line} | grep -oP '<trkpt(.*) lat="\K[^"]*' | tr -d '\n')
+			lon=$(echo ${line} | grep -oP '<trkpt(.*) lon="\K[^"]*' | tr -d '\n')
+			coo="${lat},${lon}"
+			[ "${lastcoo}" != "" ] && subdist=$(addFloat ${subdist} $(distance ${coo} ${lastcoo}))
+			lastcoo=${coo}
+			if [ "$endcoo" != "" ]; then
+				[ "${coo}" != "${endcoo}" ] && echo -e "Incorrect start coordinate ${coo} of connection on '${widfile##*\/}' (part $c)!" >&2
+				unset endcoo
+			fi;
+		elif [[ $line == *"<trkseg>"* ]]; then
+			subdist=0
+			c=$(($c + 1))
+#			echo "START subdist=${subdist}" >&2
+		elif [[ $line == *"</trkseg>"* ]]; then
+			masterdist=$(addFloat $masterdist $subdist)
+			endcoo=$lastcoo
+			echo "$c / ${#ways[@]} ${widfile##*\/} ${masterdist} km"
+		fi;
+	done < <(sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}")
+	done
+	echo "GPX distance $masterdist km"
+	echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*$masterdist/$distance")"%)"
 	echo "${relid}.gpx"
 }
 
