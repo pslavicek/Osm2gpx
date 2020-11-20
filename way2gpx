@@ -1,15 +1,18 @@
 #!/bin/bash
 
+#trap 'rm -rf "${TMPDIR}"' EXIT
+export LC_NUMERIC=C
+
 # Close STDERR FD
 #exec 2<&-
 # Open STDOUT as $LOG_FILE file for read and write.
 #exec 2<>/tmp/index.log
-#trap 'rm -rf "${TMPDIR}"' EXIT
+
 
 osmurl="https://www.openstreetmap.org/api/0.6"
 #TMPDIR=$(mktemp -d) || exit 1
 TMPDIR="/tmp/way2gpx"
-#echo "Our temp file is ${TMPDIR}"
+#echo "Our temp file is ${TMPDIR}" >&2
 
 function distance () {
 	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
