@@ -33,20 +33,16 @@ function downloadOsmPart {
 	local file="${TMPDIR}/${1}.xml"
 	file=${file/\/full/-full}
 	[ -d ${file%/*} ] || mkdir -p ${file%/*}
-	
 	if [ ! -e ${file} ]; then
-        	echo "Download ... ${osmurl}/${1}" >&2
-        	if ! curl --silent --fail "${osmurl}/${1}"; then
-        		echo "ERROR ${osmurl}/${1} not found!" >&2
+		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP/2 [23]..")
+		if [ $? -ne 0 ]; then
+        		echo -e "ERROR ${osmurl}/${1}\n url not found!" >&2
         		return 1;
         	fi
-		curl --silent "${osmurl}/${1}" -o ${file}
-	        local status=$?
-		[ -e ${file} ] || status=1;
-	        if [ $status -gt 0 ]; then
-	        	echo "Bad download [status=$status] ${osmurl}/${1}" >&2
-	        	return $status;
-	        fi;
+        	echo "Download ... ${osmurl}/${1}" >&2
+        	curl --silent "${osmurl}/${1}" -o ${file}
+        	local status=$?
+
 	fi;
 	ls -la ${file} >&2
 	ls ${file}
@@ -136,10 +132,11 @@ function generateWay {
 	local wayid=$1
 	local isReverse=$2
 	isReverse=${isReverse/"backward"/"true"}
+	echo -en "\n" >&2
 	local osmfile=$(downloadOsmPart way/${wayid}/full)
 	[ "$osmfile" == "" ] && exit 1
 
-	echo "Extract data from '${osmfile}'" >&2
+	echo "Extract data from '${osmfile}' $isReverse" >&2
 
 	local NODEFILE=$(mktemp) || exit 1
 
@@ -154,7 +151,7 @@ function generateWay {
 
 	#[ "$name" == "" ] && name=${wayid}
 
-	echo "Extract coordinates" >&2
+	echo "Extract coordinates from $wayid" >&2
 
 	grep "<node" ${osmfile} | while read -r line; do
 	#	echo "$line"
@@ -201,6 +198,7 @@ function generateWay {
 	fi;
 
 	echo "Last timestamp="${lastts} >&2
+
 #	echo "Name=$name" >&2
 #	echo "Author=$author" >&2
 #	[ "$desc" != "" ] && echo "Description: $desc"
@@ -249,12 +247,11 @@ function generateWay {
 	echo -e "\t</trk>"
 	echo -e "</gpx>"
 	echo $sumdist | awk '{printf "Distance %1.4f km\n", $1}' >&2
-
 }
 
 function generateRelation {
 	local relid=$1
-	local osmfile=$(downloadOsmPart relation/${wayid})
+	local osmfile=$(downloadOsmPart relation/${relid})
 	[ "$osmfile" == "" ] && exit 1
 
 	local name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
@@ -269,6 +266,7 @@ function generateRelation {
 	echo "Extract ways from ${osmfile}" >&2
 	local WAYSFILE=$(mktemp) || exit 1
 	grep '<member.*type=\"way\".*ref=' ${osmfile} > ${WAYSFILE}
+
 #	declare -A ways
 	ways=()
 	[ -d "${TMPDIR}/gpx" ] || mkdir -p "${TMPDIR}/gpx" || exit 1
@@ -277,12 +275,12 @@ function generateRelation {
 		wid=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) ref="\K[^"]*')
 		role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
 		[ ! -e "${TMPDIR}/gpx/${wid}-${role}.gpx" ] && generateWay ${wid} ${role} > "${TMPDIR}/gpx/${wid}-${role}.gpx"
-		#echo "GPX: ${TMPDIR}/gpx/${wid}.gpx" >&2
+		echo "GPX: ${TMPDIR}/gpx/${wid}.gpx" >&2
 		#cat "${TMPDIR}/gpx/${wid}.gpx"
 		ways+=("${TMPDIR}/gpx/${wid}-${role}.gpx")
 	done < ${WAYSFILE}
 	rm -vf ${WAYSFILE} >&2 
-	
+
 	local RELFILE=$(mktemp) || exit 1
 	for widfile in "${ways[@]}"; do
 		#echo "Extract <time> from ${widfile}" >&2
