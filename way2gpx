@@ -36,6 +36,10 @@ function downloadOsmPart {
 	
 	if [ ! -e ${file} ]; then
         	echo "Download ... ${osmurl}/${1}" >&2
+        	if ! curl --silent --fail "${osmurl}/${1}"; then
+        		echo "ERROR ${osmurl}/${1} not found!" >&2
+        		return 1;
+        	fi
 		curl --silent "${osmurl}/${1}" -o ${file}
 	        local status=$?
 		[ -e ${file} ] || status=1;
@@ -132,9 +136,10 @@ function generateWay {
 	local wayid=$1
 	local isReverse=$2
 	isReverse=${isReverse/"backward"/"true"}
-	local osmfile=$(downloadOsmPart way/${wayid}/full || exit $?)
+	local osmfile=$(downloadOsmPart way/${wayid}/full)
+	[ "$osmfile" == "" ] && exit 1
 
-	echo "Extract data from ${osmfile}" >&2
+	echo "Extract data from '${osmfile}'" >&2
 
 	local NODEFILE=$(mktemp) || exit 1
 
@@ -249,7 +254,8 @@ function generateWay {
 
 function generateRelation {
 	local relid=$1
-	local osmfile=$(downloadOsmPart relation/${relid} || exit $?)
+	local osmfile=$(downloadOsmPart relation/${wayid})
+	[ "$osmfile" == "" ] && exit 1
 
 	local name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
