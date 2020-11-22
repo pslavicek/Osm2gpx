@@ -331,7 +331,9 @@ function generateRelation {
 	echo -e "\t\t<type>path</type>" >> "${relid}.gpx"
 	[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> "${relid}.gpx"
 	for widfile in "${ways[@]}"; do
+		# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
 #		echo "Extract <trkseg> from ${widfile}" >&2
+		# Include trkseg
 		sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}" >> "${relid}.gpx"
 	done
 	echo -e "\t</trk>" >> "${relid}.gpx"
