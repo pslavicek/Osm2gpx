@@ -34,7 +34,7 @@ function downloadOsmPart {
 	file=${file/\/full/-full}
 	[ -d ${file%/*} ] || mkdir -p ${file%/*}
 	if [ ! -e ${file} ]; then
-		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP/2 [23]..")
+		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP.*OK")
 		if [ $? -ne 0 ]; then
         		echo -e "ERROR ${osmurl}/${1}\n url not found!" >&2
         		return 1;
@@ -330,12 +330,24 @@ function generateRelation {
 	echo -e "\t\t<number>${relid}</number>" >> "${relid}.gpx"
 	echo -e "\t\t<type>path</type>" >> "${relid}.gpx"
 	[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> "${relid}.gpx"
-	for widfile in "${ways[@]}"; do
-		# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
-#		echo "Extract <trkseg> from ${widfile}" >&2
-		# Include trkseg
-		sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}" >> "${relid}.gpx"
-	done
+
+	if [ "${parted}" == "true" ]; then
+		for widfile in "${ways[@]}"; do
+			echo "Extract <trkseg> from ${widfile}" >&2
+			# Include trkseg
+			sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}" >> "${relid}.gpx"
+		done
+	else
+		echo -e "\t\t<trkseg>" >> "${relid}.gpx"
+		local patternTrkSeg="/<trkseg>/{flag=1; next} /<\/trkseg>/{flag=0} flag"
+# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
+		for widfile in "${ways[@]}"; do
+			awk "${patternTrkSeg}" "${widfile}" | head -n -1 >> "${relid}.gpx"
+		done
+		awk "${patternTrkSeg}" "${widfile}" | tail -n 1 >> "${relid}.gpx" >> "${relid}.gpx"
+		echo -e "\t\t</trkseg>" >> "${relid}.gpx"
+	fi;
+
 	echo -e "\t</trk>" >> "${relid}.gpx"
 	echo "</gpx>" >> "${relid}.gpx"
 	
