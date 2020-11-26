@@ -34,7 +34,7 @@ function downloadOsmPart {
 	file=${file/\/full/-full}
 	[ -d ${file%/*} ] || mkdir -p ${file%/*}
 	if [ ! -e ${file} ]; then
-		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP.*OK")
+		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP\/[1-2].* [2\d\d]")
 		if [ $? -ne 0 ]; then
         		echo -e "ERROR ${osmurl}/${1}\n url not found!" >&2
         		return 1;
