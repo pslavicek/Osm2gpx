@@ -131,13 +131,13 @@ function getBoundary {
 function generateWay {
 	local wayid=$1
 	local isReverse=$2
-	isReverse=${isReverse/"backward"/"true"}
 	echo -en "\n" >&2
 	local osmfile=$(downloadOsmPart way/${wayid}/full)
 	[ "$osmfile" == "" ] && exit 1
 
 	echo "Extract data from '${osmfile}' $isReverse" >&2
-
+	isReverse=${isReverse/"backward"/"true"}
+	
 	local NODEFILE=$(mktemp) || exit 1
 
 	local name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
@@ -253,7 +253,8 @@ function generateRelation {
 	local relid=$1
 	local osmfile=$(downloadOsmPart relation/${relid})
 	[ "$osmfile" == "" ] && exit 1
-
+	local patternTrkSeg="/<trkseg>/{flag=1; next} /<\/trkseg>/{flag=0} flag"
+	
 	local name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
@@ -320,6 +321,16 @@ function generateRelation {
 	echo -e "${gpx_start}" > "${relid}.gpx"
 	echo -e "${gpx_metadata}" >> "${relid}.gpx"
 	
+	if [ "${parted}" == "true" ]; then
+		echo "Parted" >&2
+#	else
+		local start=$(awk "${patternTrkSeg}" "${ways[0]}" | head -n 1 | tr -d "\t/")
+		start=${start/"trkpt"/"wpt"}
+		echo -e "\t${start}\n\t\t<name>Start</name>\n\t</wpt>" >> "${relid}.gpx"
+		local end=$(awk "${patternTrkSeg}" "${ways[-1]}" | tail -n 1 | tr -d "\t/")
+		end=${end/"trkpt"/"wpt"}
+		echo -e "\t${end}\n\t\t<name>End</name>\n\t</wpt>" >> "${relid}.gpx"
+	fi;
 	
 	echo -e "\t<trk>" >> "${relid}.gpx"
 	[ "${name}" != "" ] && echo -e "\t\t<name>${name}</name>" >> "${relid}.gpx"
@@ -339,7 +350,6 @@ function generateRelation {
 		done
 	else
 		echo -e "\t\t<trkseg>" >> "${relid}.gpx"
-		local patternTrkSeg="/<trkseg>/{flag=1; next} /<\/trkseg>/{flag=0} flag"
 # https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
 		for widfile in "${ways[@]}"; do
 			awk "${patternTrkSeg}" "${widfile}" | head -n -1 >> "${relid}.gpx"
