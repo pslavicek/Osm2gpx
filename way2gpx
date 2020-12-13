@@ -399,7 +399,7 @@ function generateRelation {
 	done < <(sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}")
 	done
 	echo "GPX distance $masterdist km"
-	[ ${distance:-0} -ne 0 ] && echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
+	[ "${distance:-0}" == "0" ] && echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
 	echo "${relid}.gpx"
 }
 
