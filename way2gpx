@@ -263,6 +263,8 @@ function generateRelation {
 	local distance=$(grep -oP '<tag(.*) k=\"distance\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local author=$(grep -oP '<rel(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
 	local relts=$(grep -oP '<rel(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
+	local operator=$(grep -oP '<tag(.*) k=\"operator\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local network=$(grep -oP '<tag(.*) k=\"network\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 
 	echo "Extract ways from ${osmfile}" >&2
 	local WAYSFILE=$(mktemp) || exit 1
@@ -281,7 +283,14 @@ function generateRelation {
 		ways+=("${TMPDIR}/gpx/${wid}-${role}.gpx")
 	done < ${WAYSFILE}
 	rm -vf ${WAYSFILE} >&2 
-
+	if [ ${#ways[@]} -eq 0 ]; then
+		echo "Empty ways" >&2 
+		#grep '<member.*type=\"relation\".*ref=' ${osmfile} >&2
+		while IFS= read -r line; do
+			echo "$0 rel${line}"
+		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
+		return 1;
+	fi
 	local RELFILE=$(mktemp) || exit 1
 	for widfile in "${ways[@]}"; do
 		#echo "Extract <time> from ${widfile}" >&2
@@ -307,7 +316,9 @@ function generateRelation {
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"${author}\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
-	[ "${name}" != "" ] && echo "Name: " >&2
+	[ "${name}" != "" ] && echo "Name: ${name}" >&2
+	[ "${operator}" != "" ] && echo "Operator: ${operator}" >&2
+	[ "${network}" != "" ] && echo "Operator: ${network}" >&2
 	colour=$(checkGarminColour ${colour})
 	if [ $? -eq 0 ]; then
 		echo "Color: ${colour}" >&2
@@ -320,7 +331,7 @@ function generateRelation {
 
 	echo -e "${gpx_start}" > "${relid}.gpx"
 	echo -e "${gpx_metadata}" >> "${relid}.gpx"
-	
+	local parted=false;
 	if [ "${parted}" == "true" ]; then
 		echo "Parted" >&2
 #	else
@@ -341,7 +352,6 @@ function generateRelation {
 	echo -e "\t\t<number>${relid}</number>" >> "${relid}.gpx"
 	echo -e "\t\t<type>path</type>" >> "${relid}.gpx"
 	[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> "${relid}.gpx"
-
 	if [ "${parted}" == "true" ]; then
 		for widfile in "${ways[@]}"; do
 			echo "Extract <trkseg> from ${widfile}" >&2
@@ -352,12 +362,12 @@ function generateRelation {
 		echo -e "\t\t<trkseg>" >> "${relid}.gpx"
 # https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
 		for widfile in "${ways[@]}"; do
+			echo "A3 ${widfile}" >&2
 			awk "${patternTrkSeg}" "${widfile}" | head -n -1 >> "${relid}.gpx"
 		done
 		awk "${patternTrkSeg}" "${widfile}" | tail -n 1 >> "${relid}.gpx" >> "${relid}.gpx"
 		echo -e "\t\t</trkseg>" >> "${relid}.gpx"
 	fi;
-
 	echo -e "\t</trk>" >> "${relid}.gpx"
 	echo "</gpx>" >> "${relid}.gpx"
 	
@@ -371,7 +381,7 @@ function generateRelation {
 			lat=$(echo ${line} | grep -oP '<trkpt(.*) lat="\K[^"]*' | tr -d '\n')
 			lon=$(echo ${line} | grep -oP '<trkpt(.*) lon="\K[^"]*' | tr -d '\n')
 			coo="${lat},${lon}"
-			[ "${lastcoo}" != "" ] && subdist=$(addFloat ${subdist} $(distance ${coo} ${lastcoo}))
+			[ "${lastcoo}" != "" ] && subdist=$(addFloat ${subdist:-0} $(distance ${coo} ${lastcoo}))
 			lastcoo=${coo}
 			if [ "$endcoo" != "" ]; then
 				[ "${coo}" != "${endcoo}" ] && echo -e "Incorrect start coordinate ${coo} of connection on '${widfile##*\/}' (part $c)!" >&2
@@ -382,14 +392,14 @@ function generateRelation {
 			c=$(($c + 1))
 #			echo "START subdist=${subdist}" >&2
 		elif [[ $line == *"</trkseg>"* ]]; then
-			masterdist=$(addFloat $masterdist $subdist)
+			masterdist=$(addFloat ${masterdist:-0} ${subdist:-0})
 			endcoo=$lastcoo
 			echo "$c / ${#ways[@]} ${widfile##*\/} ${masterdist} km"
 		fi;
 	done < <(sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}")
 	done
 	echo "GPX distance $masterdist km"
-	echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*$masterdist/$distance")"%)"
+	[ ${distance:-0} -ne 0 ] && echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
 	echo "${relid}.gpx"
 }
 
