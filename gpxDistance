@@ -3,18 +3,18 @@
 export LC_NUMERIC=C
 
 function distance () {
-        local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
-        local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
+	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
+	local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
         local dlon=`bc -l <<< "(${2##*,} - ${1##*,}) * 0.01745329251994329444"`
-        local distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
-        distance=$(bc -l <<<"1.5707963267948965 - a($distance / sqrt(1 - $distance * $distance))")
-        distance=$(bc -l <<<"scale=4; ($distance * 6371 + 0.00005) / 1")
-        echo $distance | awk '{printf "%1.4f\n", $1}'
+	local distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
+	distance=$(bc -l <<<"1.5707963267948965 - a($distance / sqrt(1 - $distance * $distance))")
+	distance=$(bc -l <<<"scale=4; ($distance * 6371 + 0.00005) / 1")
+	echo $distance | awk '{printf "%1.4f\n", $1}'
 }
 
 function addFloat {
-        num=$(bc -l <<<"scale=4; ($1 + $2)")
-        echo $num | awk '{printf "%1.4f\n", $1}'
+	num=$(bc -l <<<"scale=4; ($1 + $2)")
+	echo $num | awk '{printf "%1.4f\n", $1}'
 }
 
 ################################## MAIN ##################################
@@ -22,28 +22,28 @@ function addFloat {
 gpxfile=$1
 
 if [ ! -e "${gpxfile}" ]; then
-        echo -e "gpxfile ${gpxfile} not exist" >&2
-        echo -e "$0 gpxfile" >&2
-        echo -e "\tcalculate distance by trkseq" >&2
-        exit 1;
+	echo -e "gpxfile ${gpxfile} not exist" >&2
+	echo -e "$0 gpxfile" >&2
+	echo -e "\tcalculate distance by trkseq" >&2
+	exit 1;
 fi
 
 while IFS= read -r line; do
-        if [[ $line == *"<trkpt"* ]]; then
-                lat=$(echo ${line} | grep -oP "<trkpt(.*) lat=(\"|')\K[^(\"|')]*" | tr -d '\n')
-                lon=$(echo ${line} | grep -oP "<trkpt(.*) lon=(\"|')\K[^(\"|')]*" | tr -d '\n')
-                coo="${lat},${lon}"
-                [ "${lastcoo}" != "" ] && subdist=$(addFloat ${subdist:-0} $(distance ${coo} ${lastcoo}))
-                lastcoo=${coo}
-                if [ "$endcoo" != "" ]; then
-                        [ "${coo}" != "${endcoo}" ] && echo -e "Incorrect start coordinate ${coo} of connection on '${widfile##*\/}' (part $c)!" >&2
-                        unset endcoo
-                fi;
-        elif [[ $line == *"<trkseg>"* ]]; then
-                subdist=0
-                unset lastcoo
-        elif [[ $line == *"</trkseg>"* ]]; then
-                masterdist=$(addFloat ${masterdist:-0} ${subdist:-0})
-        fi;
+	if [[ $line == *"<trkpt"* ]]; then
+		lat=$(echo ${line} | grep -oP "<trkpt(.*) lat=(\"|')\K[^(\"|')]*" | tr -d '\n')
+		lon=$(echo ${line} | grep -oP "<trkpt(.*) lon=(\"|')\K[^(\"|')]*" | tr -d '\n')
+		coo="${lat},${lon}"
+		[ "${lastcoo}" != "" ] && subdist=$(addFloat ${subdist:-0} $(distance ${coo} ${lastcoo}))
+		lastcoo=${coo}
+		if [ "$endcoo" != "" ]; then
+			[ "${coo}" != "${endcoo}" ] && echo -e "Incorrect start coordinate ${coo} of connection on '${widfile##*\/}' (part $c)!" >&2
+			unset endcoo
+		fi;
+	elif [[ $line == *"<trkseg>"* ]]; then
+		subdist=0
+		unset lastcoo
+	elif [[ $line == *"</trkseg>"* ]]; then
+		masterdist=$(addFloat ${masterdist:-0} ${subdist:-0})
+	fi;
 done < <(sed -n "/<trk>/,/<\/trk>/p" "${gpxfile}" | sed -n "/<trkseg>/,/<\/trkseg>/p")
 echo "${masterdist}"
