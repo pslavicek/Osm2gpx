@@ -13,6 +13,7 @@ osmurl="https://www.openstreetmap.org/api/0.6"
 #TMPDIR=$(mktemp -d) || exit 1
 TMPDIR="/tmp/way2gpx"
 #echo "Our temp file is ${TMPDIR}" >&2
+parted=false;
 
 function distance () {
 	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
@@ -63,6 +64,9 @@ while [ $# -ne 0 ]; do
 		--reverse|-r)
 			reverse=true
 			;;
+		--parted|-p)
+			parted=true
+			;;
 		rel*|r*)
 			objectid=${1/"rel"/"r"}
 			objectid=${objectid:1}
@@ -91,11 +95,12 @@ read -r -d '' gpx_start << EOM1
 EOM1
 
 if [ -z "${objectid}" ]; then
-	echo -e "$0 [--reverse|-r] [--output[v]|-o[v] file.gpx] [rel|r][way|w]numberofobject" >&2
+	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
 	echo -e "\tconvert osm way to gpx" >&2
-	echo -e "\t--reverse|-r\t: reverse path (only way)" >&2
+	echo -e "\t--reverse|-r\t: reverse path (only way), default: false" >&2
+	echo -e "\t--parted|-p\t: division path (only relation), default: false" >&2
 	echo -e "\t--output|-o gpxfile\t: export to file" >&2
-	echo -e "\t--outputv|-ov gpxfile\t: export to file with GPX validation" >&2
+	echo -e "\t--validate|-v\t: export with GPX validation, default: false" >&2
 	echo -e "\trel|r\t: numberofobject is relation" >&2
 	echo -e "\tway|w\t: numberofobject is way (default)" >&2
 	echo -e "\nExample\t$0 -r 327119963" >&2
@@ -283,14 +288,18 @@ function generateRelation {
 		ways+=("${TMPDIR}/gpx/${wid}-${role}.gpx")
 	done < ${WAYSFILE}
 	rm -vf ${WAYSFILE} >&2 
-	if [ ${#ways[@]} -eq 0 ]; then
-		echo "Empty ways" >&2 
-		#grep '<member.*type=\"relation\".*ref=' ${osmfile} >&2
+	if [ "${objectid}" == "${relid}" ]; then
+		echo "Relations of ${relid}" >&2 
+		test -d "gpx/${objectid}" || mkdir -p "gpx/${objectid}"
 		while IFS= read -r line; do
-			echo "$0 rel${line}"
+			echo -e "\n$0 rel${line}"
+			local filename="${line}.gpx"
+			generateRelation ${line}
+			mv -v ${filename} "gpx/${objectid}/"
 		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
-		return 1;
-	fi
+	fi;
+	[ ${#ways[@]} -eq 0 ] && return 1;
+	
 	local RELFILE=$(mktemp) || exit 1
 	for widfile in "${ways[@]}"; do
 		#echo "Extract <time> from ${widfile}" >&2
@@ -331,10 +340,9 @@ function generateRelation {
 
 	echo -e "${gpx_start}" > "${relid}.gpx"
 	echo -e "${gpx_metadata}" >> "${relid}.gpx"
-	local parted=false;
 	if [ "${parted}" == "true" ]; then
 		echo "Parted" >&2
-#	else
+	else
 		local start=$(awk "${patternTrkSeg}" "${ways[0]}" | head -n 1 | tr -d "\t/")
 		start=${start/"trkpt"/"wpt"}
 		echo -e "\t${start}\n\t\t<name>Start</name>\n\t</wpt>" >> "${relid}.gpx"
@@ -374,6 +382,8 @@ function generateRelation {
 	# Check distance
 	masterdist=0
 	c=0
+	local endcoo;
+	local coo;
 	for widfile in "${ways[@]}"; do
 	while IFS= read -r line; do
 #		echo "line '${line}'"
@@ -399,7 +409,7 @@ function generateRelation {
 	done < <(sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}")
 	done
 	echo "GPX distance $masterdist km"
-	[ "${distance:-0}" == "0" ] && echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
+	[ ${distance:-0} -eq 0 ] || echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
 	echo "${relid}.gpx"
 }
 
