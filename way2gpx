@@ -215,6 +215,7 @@ function generateWay {
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
 	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"${author}\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
+	echo "src='${website}'"
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
@@ -259,6 +260,7 @@ function generateRelation {
 	local osmfile=$(downloadOsmPart relation/${relid})
 	[ "$osmfile" == "" ] && exit 1
 	local patternTrkSeg="/<trkseg>/{flag=1; next} /<\/trkseg>/{flag=0} flag"
+	local patternTrk="/<trk>/{flag=1; next} /<\/trk>/{flag=0} flag"
 	
 	local name=$(grep -oP '<tag(.*) k=\"name\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local desc=$(grep -oP '<tag(.*) k=\"description\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
@@ -276,32 +278,55 @@ function generateRelation {
 	grep '<member.*type=\"way\".*ref=' ${osmfile} > ${WAYSFILE}
 
 #	declare -A ways
-	ways=()
+	local ways=()
 	[ -d "${TMPDIR}/gpx" ] || mkdir -p "${TMPDIR}/gpx" || exit 1
 	while read -r line; do
 		#echo "$line"
-		wid=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) ref="\K[^"]*')
-		role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
-		[ ! -e "${TMPDIR}/gpx/${wid}-${role}.gpx" ] && generateWay ${wid} ${role} > "${TMPDIR}/gpx/${wid}-${role}.gpx"
-		echo "GPX: ${TMPDIR}/gpx/${wid}.gpx" >&2
-		#cat "${TMPDIR}/gpx/${wid}.gpx"
-		ways+=("${TMPDIR}/gpx/${wid}-${role}.gpx")
+		local refway=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) ref="\K[^"]*')
+		local role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
+		[ ! -e "${TMPDIR}/gpx/${refway}-${role}.gpx" ] && generateWay ${refway} ${role} > "${TMPDIR}/gpx/${refway}-${role}.gpx"
+		#echo "GPX: ${TMPDIR}/gpx/${refway}.gpx" >&2
+		#cat "${TMPDIR}/gpx/${refway}.gpx"
+		ways+=("${TMPDIR}/gpx/${refway}-${role}.gpx")
 	done < ${WAYSFILE}
-	rm -vf ${WAYSFILE} >&2 
+	rm -vf ${WAYSFILE} >&2
+	echo "obejctid=${objectid} relid=${relid}" >&2
+	local rels=()
 	if [ "${objectid}" == "${relid}" ]; then
 		echo "Relations of ${relid}" >&2 
-		test -d "gpx/${objectid}" || mkdir -p "gpx/${objectid}"
+		#test -d "gpx/${objectid}" || mkdir -p "gpx/${objectid}"
 		while IFS= read -r line; do
-			echo -e "\n$0 rel${line}"
+			echo -e "\nExecute: $0 rel${line}" >&2
 			local filename="${line}.gpx"
 			generateRelation ${line}
-			mv -v ${filename} "gpx/${objectid}/"
+#			mv -v ${filename} "${TMPDIR}/gpx/${objectid}.gpx"
+			rels+=(${filename})
 		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
 	fi;
-	[ ${#ways[@]} -eq 0 ] && return 1;
+
+	test [[ ${#ways[@]} -eq 0 ] && [ ${#rels[@]} -eq 0 ]] && return 1;
 	
 	local RELFILE=$(mktemp) || exit 1
+
+#	for widfile in "${ways[@]}"; do
+#		echo "way=$widfile"
+#	done;
+#	for widfile in "${rels[@]}"; do
+#		echo "rels=$widfile"
+#	done;
+
 	for widfile in "${ways[@]}"; do
+		#echo "Extract <time> from ${widfile}" >&2
+		ts=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep "<time>" | sed -e "s/<time>\(.*\)<\/time>/\1/" | tr -d '\t')
+		#<bounds minlat="50.4102420" maxlat="50.4117190" minlon="14.5725041" maxlon="14.5754772"/>
+		minlat=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) minlat="\K[^"]*')
+		maxlat=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) maxlat="\K[^"]*')
+		minlon=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) minlon="\K[^"]*')
+		maxlon=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep -oP '<bounds(.*) maxlon="\K[^"]*')
+		echo "${widfile##*\/} ${minlat},${minlon} ${ts}" >> ${RELFILE} 
+		echo "${widfile##*\/} ${maxlat},${maxlon} ${ts}" >> ${RELFILE} 
+	done
+	for widfile in "${rels[@]}"; do
 		#echo "Extract <time> from ${widfile}" >&2
 		ts=$(sed -n "/<metadata/,/<\/metadata>/p" "${widfile}" | grep "<time>" | sed -e "s/<time>\(.*\)<\/time>/\1/" | tr -d '\t')
 		#<bounds minlat="50.4102420" maxlat="50.4117190" minlon="14.5725041" maxlon="14.5754772"/>
@@ -340,43 +365,62 @@ function generateRelation {
 
 	echo -e "${gpx_start}" > "${relid}.gpx"
 	echo -e "${gpx_metadata}" >> "${relid}.gpx"
-	if [ "${parted}" == "true" ]; then
-		echo "Parted" >&2
-	else
-		local start=$(awk "${patternTrkSeg}" "${ways[0]}" | head -n 1 | tr -d "\t/")
-		start=${start/"trkpt"/"wpt"}
-		echo -e "\t${start}\n\t\t<name>Start</name>\n\t</wpt>" >> "${relid}.gpx"
-		local end=$(awk "${patternTrkSeg}" "${ways[-1]}" | tail -n 1 | tr -d "\t/")
-		end=${end/"trkpt"/"wpt"}
-		echo -e "\t${end}\n\t\t<name>End</name>\n\t</wpt>" >> "${relid}.gpx"
-	fi;
+
 	
-	echo -e "\t<trk>" >> "${relid}.gpx"
-	[ "${name}" != "" ] && echo -e "\t\t<name>${name}</name>" >> "${relid}.gpx"
-	[ "${note}" != "" ] && echo -e "\t\t<cmt>${note}</cmt>" >> "${relid}.gpx"
-	[ "${desc}" != "" ] && echo -e "\t\t<desc>${desc}</desc>" >> "${relid}.gpx"
-	echo -e "\t\t<src>OpenStreetMap</src>" >> "${relid}.gpx"
-	echo -e "\t\t<link href=\"https://www.openstreetmap.org/relation/${relid}\"><text>${relid}</text></link>" >> "${relid}.gpx"
-	echo -e "\t\t<number>${relid}</number>" >> "${relid}.gpx"
-	echo -e "\t\t<type>path</type>" >> "${relid}.gpx"
-	[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> "${relid}.gpx"
-	if [ "${parted}" == "true" ]; then
-		for widfile in "${ways[@]}"; do
-			echo "Extract <trkseg> from ${widfile}" >&2
-			# Include trkseg
-			sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}" >> "${relid}.gpx"
-		done
-	else
-		echo -e "\t\t<trkseg>" >> "${relid}.gpx"
-# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
-		for widfile in "${ways[@]}"; do
-			echo "A3 ${widfile}" >&2
-			awk "${patternTrkSeg}" "${widfile}" | head -n -1 >> "${relid}.gpx"
-		done
-		awk "${patternTrkSeg}" "${widfile}" | tail -n 1 >> "${relid}.gpx" >> "${relid}.gpx"
-		echo -e "\t\t</trkseg>" >> "${relid}.gpx"
+	if [ ${#ways[@]} -ne 0 ]; then
+
+		if [ "${parted}" == "true" ]; then
+			echo "Parted" >&2
+		else
+			local start=$(awk "${patternTrkSeg}" "${ways[0]}" | head -n 1 | tr -d "\t/")
+			start=${start/"trkpt"/"wpt"}
+			echo -e "\t${start}\n\t\t<name>Start</name>\n\t</wpt>" >> "${relid}.gpx"
+			local end=$(awk "${patternTrkSeg}" "${ways[-1]}" | tail -n 1 | tr -d "\t/")
+			end=${end/"trkpt"/"wpt"}
+			echo -e "\t${end}\n\t\t<name>End</name>\n\t</wpt>" >> "${relid}.gpx"
+		fi;
+	
+		echo -e "\t<trk>" >> "${relid}.gpx"
+		[ "${name}" != "" ] && echo -e "\t\t<name>${name}</name>" >> "${relid}.gpx"
+		[ "${note}" != "" ] && echo -e "\t\t<cmt>${note}</cmt>" >> "${relid}.gpx"
+		[ "${desc}" != "" ] && echo -e "\t\t<desc>${desc}</desc>" >> "${relid}.gpx"
+		echo -e "\t\t<src>OpenStreetMap</src>" >> "${relid}.gpx"
+		if [ "${website}" != "" ]; then
+			echo -e "\t\t<link href=\"${website}\"><text>${name}</text></link>" >> "${relid}.gpx"
+		else
+			echo -e "\t\t<link href=\"https://www.openstreetmap.org/relation/${relid}\"><text>${relid}</text></link>" >> "${relid}.gpx"
+		fi;
+		echo -e "\t\t<number>${relid}</number>" >> "${relid}.gpx"
+		echo -e "\t\t<type>path</type>" >> "${relid}.gpx"
+		[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> "${relid}.gpx"
+		if [ "${parted}" == "true" ]; then
+			for widfile in "${ways[@]}"; do
+				echo "Extract <trkseg> from ${widfile}" >&2
+				# Include trkseg
+				sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}" >> "${relid}.gpx"
+			done
+		else
+			echo -e "\t\t<trkseg>" >> "${relid}.gpx"
+	# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
+			for widfile in "${ways[@]}"; do
+				#echo "A3 ${widfile}" >&2
+				awk "${patternTrkSeg}" "${widfile}" | head -n -1 >> "${relid}.gpx"
+			done
+			awk "${patternTrkSeg}" "${widfile}" | tail -n 1 >> "${relid}.gpx" >> "${relid}.gpx"
+			echo -e "\t\t</trkseg>" >> "${relid}.gpx"
+		fi;
+		echo -e "\t</trk>" >> "${relid}.gpx"
 	fi;
-	echo -e "\t</trk>" >> "${relid}.gpx"
+	if [ ${#rels[@]} -ne 0 ]; then
+	#	awk 'flag{ if (/PAT2/){printf "%s", buf; flag=0; buf=""} else buf = buf $0 ORS}; /PAT1/{flag=1}' file
+		for widfile in "${rels[@]}"; do
+			echo "Extract <trk> from ${widfile}" >&2
+			echo -e "\t<trk>" >> "${relid}.gpx"
+			awk "${patternTrk}" "${widfile}" >> "${relid}.gpx"
+			echo -e "\n\t</trk>" >> "${relid}.gpx"
+			rm "${widfile}"
+		done
+	fi;
 	echo "</gpx>" >> "${relid}.gpx"
 	
 	# Check distance
@@ -408,8 +452,8 @@ function generateRelation {
 		fi;
 	done < <(sed -n "/<trkseg>/,/<\/trkseg>/p" "${widfile}")
 	done
-	echo "GPX distance $masterdist km"
-	[ ${distance:-0} -eq 0 ] || echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
+	echo "GPX distance $masterdist km (${distance})"
+	[ ${distance:-0} == "0" ] || echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
 	echo "${relid}.gpx"
 }
 
