@@ -304,7 +304,7 @@ function generateRelation {
 		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
 	fi;
 
-	if [[ ${#ways[@]} -eq 0 ] && [ ${#rels[@]} -eq 0 ]]; then
+	if [ ${#ways[@]} -eq 0 ] && [ ${#rels[@]} -eq 0 ]; then
 		echo "Empty ways and relations..." >&2
 		return 1;
 	fi;
@@ -355,7 +355,7 @@ function generateRelation {
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	[ "${name}" != "" ] && echo "Name: ${name}" >&2
 	[ "${operator}" != "" ] && echo "Operator: ${operator}" >&2
-	[ "${network}" != "" ] && echo "Operator: ${network}" >&2
+	[ "${network}" != "" ] && echo "Network: ${network}" >&2
 	colour=$(checkGarminColour ${colour})
 	if [ $? -eq 0 ]; then
 		echo "Color: ${colour}" >&2
