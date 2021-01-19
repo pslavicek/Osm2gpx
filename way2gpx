@@ -304,7 +304,10 @@ function generateRelation {
 		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
 	fi;
 
-	test [[ ${#ways[@]} -eq 0 ] && [ ${#rels[@]} -eq 0 ]] && return 1;
+	if [[ ${#ways[@]} -eq 0 ] && [ ${#rels[@]} -eq 0 ]]; then
+		echo "Empty ways and relations..." >&2
+		return 1;
+	fi;
 	
 	local RELFILE=$(mktemp) || exit 1
 
