@@ -34,6 +34,15 @@ function downloadOsmPart {
 	local file="${TMPDIR}/${1}.xml"
 	file=${file/\/full/-full}
 	[ -d ${file%/*} ] || mkdir -p ${file%/*}
+	local difftime=0;
+	if [ -e ${file} ]; then
+		local file_time=$(stat --format='%Y' "$file")
+		local current_time=$(date +%s)
+		difftime=$(( $current_time - $file_time ));
+	fi;
+	ls -l $file
+	echo "Difftime=$diff_time"
+	exit 1;
 	if [ ! -e ${file} ]; then
 		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP\/[1-2].* [2\d\d]")
 		if [ $? -ne 0 ]; then
@@ -237,18 +246,18 @@ function generateWay {
 	echo -e "\t${gpx_trkhead}"
 	echo -e "\t\t<trkseg>"
 
-	for ((i = 0; i < ${#nodes[@]}; i++)); do
-		n=${nodes[$i]};
-		coordinate=${coordinates[$n]};
-		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>"
-		
-		if [ $i -ne 0 ]; then
-			dist=$(distance $lastcoo ${coordinates[$n]})
-			sumdist=$(echo "${sumdist:-0} + $dist" | bc -l)
-			#echo " $dist $sumdist"
-		fi;
-		lastcoo=${coordinate}
-	done
+#	for ((i = 0; i < ${#nodes[@]}; i++)); do
+#		n=${nodes[$i]};
+#		coordinate=${coordinates[$n]};
+#		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>"
+#		
+#		if [ $i -ne 0 ]; then
+#			dist=$(distance $lastcoo ${coordinates[$n]})
+#			sumdist=$(echo "${sumdist:-0} + $dist" | bc -l)
+#			#echo " $dist $sumdist"
+#		fi;
+#		lastcoo=${coordinate}
+#	done
 	echo -e "\t\t</trkseg>"
 	echo -e "\t</trk>"
 	echo -e "</gpx>"
