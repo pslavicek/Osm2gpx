@@ -1,8 +1,4 @@
 #!/bin/bash
-
-TMPDIR=$(mktemp -d) || exit 1
-TMPDIR="/tmp/rel2way"
-#trap 'rm -rf "${TMPDIR}"' EXIT
 export LC_NUMERIC=C
 
 # Close STDERR FD
@@ -33,16 +29,21 @@ function addFloat {
 
 function checkFileTime {
 	local file=$1
-	local checkTime=${2:-3600000}
+	local maxTime=${2:-3600}
 	local diffTime=0;
 	if [ -e "${file}" ]; then
 		local fileTime=$(stat --format='%Y' "${file}")
 		local currTime=$(date +%s)
-		diffTime=$(($currTime-$fileTime-$checkTime));
+		diffTime=$(($currTime-$fileTime));
+	        echo "The $file is "$(bc -l <<<"scale=1;$diffTime/3600")" hour(s) old." >&2
+	        diffTime=$((${diffTime}-${maxTime}));
+		if [ ${diffTime} -ge 0 ]; then
+		        return 1;
+		fi;
+	else
+	        echo "The $file not found!" >&2
+	        return 1;
 	fi;
-	[ ${diffTime} -ge 0 ] && return 1;
-        echo "Cached $file is old "$(($diffTime/-60000))" minute(s)" >&2
-	return 0;
 }
 
 function downloadOsmPart {
@@ -54,19 +55,23 @@ function downloadOsmPart {
 		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP\/[1-2].* [2\d\d]")
 		if [ $? -ne 0 ]; then
         		echo -e "ERROR ${osmurl}/${1}\n url not found!" >&2
+        		if [ -e ${filename} ]; then
+       				echo "Use cache older file ${filename}" >&2
+       				return 0;
+       			fi;
         		return 1;
         	fi
         	echo "Download ... ${osmurl}/${1}" >&2
         	curl --silent "${osmurl}/${1}" -o ${filename}
         	local status=$?
+        else
+		echo "Use cache file ${filename}" >&2
 	fi;
 #	ls -la ${filename} >&2
 	ls ${filename}
 }
 
-#downloadOsmPart relation/12012940
-#echo "Exit=$?"
-#exit 1
+TMPDIR="./tmp"
 
 while [ $# -ne 0 ]; do
 	arg="$1"
@@ -86,6 +91,9 @@ while [ $# -ne 0 ]; do
 		--parted|-p)
 			parted=true
 			;;
+		--dir|-d)
+			TMPDIR=$1
+			;;
 		rel*|r*)
 			objectid=${1/"rel"/"r"}
 			objectid=${objectid:1}
@@ -104,7 +112,12 @@ while [ $# -ne 0 ]; do
 	shift
 done
 
-read -r -d '' gpx_start << EOM1
+if [ -z ${TMPDIR} ]; then
+	TMPDIR=$(mktemp -d) || exit 1
+	trap 'rm -rf "${TMPDIR}"' EXIT
+fi;
+
+gpx_start=$(cat <<EOM1
 <?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
 <gpx version="1.1"
 	creator="way2gpx - https://osm.slavics.cz"
@@ -112,6 +125,7 @@ read -r -d '' gpx_start << EOM1
 	xmlns="http://www.topografix.com/GPX/1/1"
 	xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
 EOM1
+)
 
 if [ -z "${objectid}" ]; then
 	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
@@ -233,7 +247,7 @@ function generateWay {
 	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
 	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
-	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"${author}\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"© OpenStreetMap contributors\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
 	echo "src='${website}'"
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
@@ -256,18 +270,18 @@ function generateWay {
 	echo -e "\t${gpx_trkhead}"
 	echo -e "\t\t<trkseg>"
 
-#	for ((i = 0; i < ${#nodes[@]}; i++)); do
-#		n=${nodes[$i]};
-#		coordinate=${coordinates[$n]};
-#		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>"
-#		
+	for ((i = 0; i < ${#nodes[@]}; i++)); do
+		n=${nodes[$i]};
+		coordinate=${coordinates[$n]};
+		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>"
+		
 #		if [ $i -ne 0 ]; then
 #			dist=$(distance $lastcoo ${coordinates[$n]})
 #			sumdist=$(echo "${sumdist:-0} + $dist" | bc -l)
-#			#echo " $dist $sumdist"
+			#echo " $dist $sumdist"
 #		fi;
 #		lastcoo=${coordinate}
-#	done
+	done
 	echo -e "\t\t</trkseg>"
 	echo -e "\t</trk>"
 	echo -e "</gpx>"
@@ -296,7 +310,7 @@ function generateRelation {
 	echo "Extract ways from ${osmfile}" >&2
 	local WAYSFILE=$(mktemp) || exit 1
 	grep '<member.*type=\"way\".*ref=' ${osmfile} > ${WAYSFILE}
-	exit 1;
+
 #	declare -A ways
 	local ways=()
 	[ -d "${TMPDIR}/gpx" ] || mkdir -p "${TMPDIR}/gpx" || exit 1
@@ -305,9 +319,8 @@ function generateRelation {
 		local refway=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) ref="\K[^"]*')
 		local role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
 		local gpxFile="${TMPDIR}/gpx/${refway}-${role}.gpx"
-		checkFileTime ${gpxFile} && generateWay ${refway} ${role} > ${gpxFile}
-		#echo "GPX: ${gpxFile}" >&2
-		#cat ${gpxFile}
+		checkFileTime ${gpxFile} || generateWay ${refway} ${role} > ${gpxFile}
+#		echo "GPX: ${gpxFile}" >&2
 		ways+=(${gpxFile})
 	done < ${WAYSFILE}
 	rm -vf ${WAYSFILE} >&2
@@ -371,7 +384,7 @@ function generateRelation {
 	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
 	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
-	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"${author}\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"© OpenStreetMap contributors\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	[ "${name}" != "" ] && echo "Name: ${name}" >&2
@@ -386,99 +399,92 @@ function generateRelation {
 
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
-
-	echo -e "${gpx_start}"
-	echo -e "${gpx_metadata}"
+	local gpxrel=$(mktemp)
+	echo "Create temporaly file $gpxrel" >&2
+	echo -e "${gpx_start}" > ${gpxrel}
+	echo -e "${gpx_metadata}" >> ${gpxrel}
 
 	
 	if [ ${#ways[@]} -ne 0 ]; then
 
-		if [ "${parted}" == "true" ]; then
-			echo "Parted" >&2
-		else
-			local start=$(awk "${patternTrkSeg}" "${ways[0]}" | head -n 1 | tr -d "\t/")
-			start=${start/"trkpt"/"wpt"}
-			echo -e "\t${start}\n\t\t<name>Start</name>\n\t</wpt>"
-			local end=$(awk "${patternTrkSeg}" "${ways[-1]}" | tail -n 1 | tr -d "\t/")
-			end=${end/"trkpt"/"wpt"}
-			echo -e "\t${end}\n\t\t<name>End</name>\n\t</wpt>"
-		fi;
-	
-		echo -e "\t<trk>" >> "${relid}.gpx"
-		[ "${name}" != "" ] && echo -e "\t\t<name>${name}</name>"
-		[ "${note}" != "" ] && echo -e "\t\t<cmt>${note}</cmt>"
-		[ "${desc}" != "" ] && echo -e "\t\t<desc>${desc}</desc>"
-		echo -e "\t\t<src>OpenStreetMap</src>"
+		echo -e "\t<trk>" >> "${relid}.gpx"  >> ${gpxrel}
+		[ "${name}" != "" ] && echo -e "\t\t<name>${name}</name>" >> ${gpxrel}
+		[ "${note}" != "" ] && echo -e "\t\t<cmt>${note}</cmt>" >> ${gpxrel}
+		[ "${desc}" != "" ] && echo -e "\t\t<desc>${desc}</desc>" >> ${gpxrel}
+		echo -e "\t\t<src>OpenStreetMap</src>" >> ${gpxrel}
 		if [ "${website}" != "" ]; then
-			echo -e "\t\t<link href=\"${website}\"><text>${name}</text></link>"
+			echo -e "\t\t<link href=\"${website}\"><text>${name}</text></link>" >> ${gpxrel}
 		else
-			echo -e "\t\t<link href=\"https://www.openstreetmap.org/relation/${relid}\"><text>${relid}</text></link>"
+			echo -e "\t\t<link href=\"https://www.openstreetmap.org/relation/${relid}\"><text>${relid}</text></link>" >> ${gpxrel}
 		fi;
-		echo -e "\t\t<number>${relid}</number>"
-		echo -e "\t\t<type>path</type>"
-		[ "${extension}" != "" ] && echo -e "\t\t${extension}"
+		echo -e "\t\t<number>${relid}</number>" >> ${gpxrel}
+		echo -e "\t\t<type>path</type>" >> ${gpxrel}
+		[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> ${gpxrel}
 		if [ "${parted}" == "true" ]; then
 			for wayfile in "${ways[@]}"; do
 				echo "Extract <trkseg> from ${wayfile}" >&2
 				# Include trkseg
-				sed -n "/<trkseg>/,/<\/trkseg>/p" "${wayfile}"
+				sed -n "/<trkseg>/,/<\/trkseg>/p" "${wayfile}" >> ${gpxrel}
 			done
 		else
-			echo -e "\t\t<trkseg>" >> "${relid}.gpx"
+			echo -e "\t\t<trkseg>" >> ${gpxrel}
 	# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
 			for wayfile in "${ways[@]}"; do
 				#echo "A3 ${wayfile}" >&2
-				awk "${patternTrkSeg}" "${wayfile}" | head -n -1
+				awk "${patternTrkSeg}" "${wayfile}" | head -n -1 >> ${gpxrel}
 			done
-			awk "${patternTrkSeg}" "${wayfile}" | tail -n 1 >> "${relid}.gpx"
-			echo -e "\t\t</trkseg>"
+			awk "${patternTrkSeg}" "${wayfile}" | tail -n 1 >> ${gpxrel}
+			echo -e "\t\t</trkseg>" >> ${gpxrel}
 		fi;
-		echo -e "\t</trk>"
+		echo -e "\t</trk>" >> ${gpxrel}
 	fi;
+
 	if [ ${#rels[@]} -ne 0 ]; then
 	#	awk 'flag{ if (/PAT2/){printf "%s", buf; flag=0; buf=""} else buf = buf $0 ORS}; /PAT1/{flag=1}' file
 		for wayfile in "${rels[@]}"; do
 			echo "Extract <trk> from ${wayfile}" >&2
-			echo -e "\t<trk>"
-			awk "${patternTrk}" "${wayfile}"
-			echo -e "\n\t</trk>"
-			rm "${wayfile}"
+			echo -e "\t<trk>" >> ${gpxrel}
+			awk "${patternTrk}" "${wayfile}" >> ${gpxrel}
+			echo -e "\n\t</trk>" >> ${gpxrel}
 		done
 	fi;
-	echo "</gpx>"
+	echo "</gpx>" >> ${gpxrel}
 	
 	# Check distance
-	masterdist=0
-	c=0
-	local endcoo;
-	local coo;
-	for wayfile in "${ways[@]}"; do
-	while IFS= read -r line; do
-#		echo "line '${line}'"
-		if [[ $line == *"<trkpt"* ]]; then
-			lat=$(echo ${line} | grep -oP '<trkpt(.*) lat="\K[^"]*' | tr -d '\n')
-			lon=$(echo ${line} | grep -oP '<trkpt(.*) lon="\K[^"]*' | tr -d '\n')
-			coo="${lat},${lon}"
-			[ "${lastcoo}" != "" ] && subdist=$(addFloat ${subdist:-0} $(distance ${coo} ${lastcoo}))
-			lastcoo=${coo}
-			if [ "$endcoo" != "" ]; then
-				[ "${coo}" != "${endcoo}" ] && echo -e "Incorrect start coordinate ${coo} of connection on '${wayfile##*\/}' (part $c)!" >&2
-				unset endcoo
+	if [ "${checkDistance}" == "true" ]; then
+		local masterdist=0
+		local c=0
+		local endcoo;
+		local coo;
+		for wayfile in "${ways[@]}"; do
+		while IFS= read -r line; do
+	#		echo "line '${line}'"
+			if [[ $line == *"<trkpt"* ]]; then
+				lat=$(echo ${line} | grep -oP '<trkpt(.*) lat="\K[^"]*' | tr -d '\n')
+				lon=$(echo ${line} | grep -oP '<trkpt(.*) lon="\K[^"]*' | tr -d '\n')
+				coo="${lat},${lon}"
+				[ "${lastcoo}" != "" ] && subdist=$(addFloat ${subdist:-0} $(distance ${coo} ${lastcoo}))
+				lastcoo=${coo}
+				if [ "$endcoo" != "" ]; then
+					[ "${coo}" != "${endcoo}" ] && echo -e "Incorrect start coordinate ${coo} of connection on '${wayfile##*\/}' (part $c)!" >&2
+					unset endcoo
+				fi;
+			elif [[ $line == *"<trkseg>"* ]]; then
+				subdist=0
+				c=$(($c + 1))
+	#			echo "START subdist=${subdist}" >&2
+			elif [[ $line == *"</trkseg>"* ]]; then
+				masterdist=$(addFloat ${masterdist:-0} ${subdist:-0})
+				endcoo=$lastcoo
+				echo "$c / ${#ways[@]} ${wayfile##*\/} ${masterdist} km"
 			fi;
-		elif [[ $line == *"<trkseg>"* ]]; then
-			subdist=0
-			c=$(($c + 1))
-#			echo "START subdist=${subdist}" >&2
-		elif [[ $line == *"</trkseg>"* ]]; then
-			masterdist=$(addFloat ${masterdist:-0} ${subdist:-0})
-			endcoo=$lastcoo
-			echo "$c / ${#ways[@]} ${wayfile##*\/} ${masterdist} km"
-		fi;
-	done < <(sed -n "/<trkseg>/,/<\/trkseg>/p" "${wayfile}")
-	done
-	echo "GPX distance $masterdist km (${distance})"
-	[ ${distance:-0} == "0" ] || echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
-	echo "${relid}.gpx"
+		done < <(sed -n "/<trkseg>/,/<\/trkseg>/p" "${wayfile}")
+		done
+		echo "GPX distance $masterdist km (${distance})"
+		[ ${distance:-0} == "0" ] || echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
+	fi;
+	cat ${gpxrel}
+	rm ${gpxrel}
 }
 
 if [ "${type}" == "rel" ]; then
