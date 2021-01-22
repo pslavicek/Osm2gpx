@@ -5,13 +5,13 @@ export LC_NUMERIC=C
 #exec 2<&-
 # Open STDOUT as $LOG_FILE file for read and write.
 #exec 2<>/tmp/index.log
-
+touch tmp/relation/11880142.xml 
 
 osmurl="https://www.openstreetmap.org/api/0.6"
 
 #echo "Our temp file is ${TMPDIR}" >&2
 parted=false;
-
+validate=true;
 function distance () {
 	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
 	local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
@@ -71,6 +71,20 @@ function downloadOsmPart {
 	ls ${filename}
 }
 
+function gpxValidate {
+	local file=$1;
+	echo "GPX Validation ${file}" >&2
+	echo xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
+	xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
+	local status=$?
+	if [ $status -eq 0 ]; then
+		echo "GPX Validation ${file} OK" >&2
+	else
+		echo "GPX Validation ${file} Badly" >&2
+	fi
+	return $status
+}
+
 TMPDIR="./tmp"
 
 while [ $# -ne 0 ]; do
@@ -80,13 +94,11 @@ while [ $# -ne 0 ]; do
 			shift;
 			gpxfile=$1
 			;;
-		--outputv|-ov)
-			shift;
-			gpxfile=$1
-			validate=true
-			;;
 		--reverse|-r)
 			reverse=true
+			;;
+		--validate|-v)
+			validate=true
 			;;
 		--parted|-p)
 			parted=true
@@ -123,9 +135,13 @@ gpx_start=$(cat <<EOM1
 	creator="way2gpx - https://osm.slavics.cz"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xmlns="http://www.topografix.com/GPX/1/1"
-	xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
 EOM1
 )
+nameSpaceGpxx="xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\""
+xsiDefault='\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">'
+xsiGarmin='\txmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"\n\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd">'
+
+xsiGarmin=${xsiDefault}
 
 if [ -z "${objectid}" ]; then
 	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
@@ -258,14 +274,23 @@ function generateWay {
 	gpx_trkhead="${gpx_trkhead}\n\t\t<src>OpenStreetMap</src>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<link href=\"https://www.openstreetmap.org/way/${wayid}\"><text>${wayid}</text></link>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<type>${type1}</type>"
-		
+
+
 	colour=$(checkGarminColour ${colour})
 	if [ $? -eq 0 ]; then
 		echo "Set color: ${colour}" >&2
-		gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
+		local gpxcolor="<gpxx:DisplayColors>${colour}</gpxx:DisplayColors>"
+		local gpxx="\t\t\t<gpxx:TrackExtension ${nameSpaceGpxx}>\n\t\t\t\t${gpxcolor}\n\t\t\t</gpxx:TrackExtension>"
+		gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n${gpxx}\n\t\t</extensions>"
 	fi;
 
-	echo -e "${gpx_start}" 
+	echo -e "${gpx_start}"	
+	if [ -z "${colour}" ]; then
+		echo -e "${xsiGarmin}"
+	else
+		echo -e "${xsiDefault}"
+	fi;
+
 	echo -e "${gpx_metadata}"
 	echo -e "\t${gpx_trkhead}"
 	echo -e "\t\t<trkseg>"
@@ -291,7 +316,6 @@ function generateWay {
 function generateRelation {
 	local relid=$1
 	local osmfile=$(downloadOsmPart relation/${relid})
-	echo "osmfile=$osmfile"
 	[ "$osmfile" == "" ] && exit 1
 	local patternTrkSeg="/<trkseg>/{flag=1; next} /<\/trkseg>/{flag=0} flag"
 	local patternTrk="/<trk>/{flag=1; next} /<\/trk>/{flag=0} flag"
@@ -305,7 +329,7 @@ function generateRelation {
 	local author=$(grep -oP '<rel(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
 	local relts=$(grep -oP '<rel(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
 	local operator=$(grep -oP '<tag(.*) k=\"operator\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
-	local network=$(grep -oP '<tag(.*) k=\"network\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local type=$(grep -oP '<tag(.*) k=\"type\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 
 	echo "Extract ways from ${osmfile}" >&2
 	local WAYSFILE=$(mktemp) || exit 1
@@ -326,16 +350,19 @@ function generateRelation {
 	rm -vf ${WAYSFILE} >&2
 	echo "obejctid=${objectid} relid=${relid}" >&2
 	local rels=()
-	if [ "${objectid}" == "${relid}" ]; then
+	if [ "${objectid}" == "${relid}" ] && [ "${type}" == "network" ]; then
 		echo "Relations of ${relid}" >&2 
 		#test -d "gpx/${objectid}" || mkdir -p "gpx/${objectid}"
 		while IFS= read -r line; do
 			echo -e "\nExecute: $0 rel${line}" >&2
-			local filename="${line}.gpx"
-			generateRelation ${line}
-#			mv -v ${filename} "${TMPDIR}/gpx/${objectid}.gpx"
-			rels+=(${filename})
+			local gpxFile2="${TMPDIR}/gpx/${line}.gpx"
+			echo "gpxFile2=${gpxFile2}" >&2
+			generateRelation ${line} > ${gpxFile2}
+			echo "Add relation ${gpxFile2}" >&2
+			rels+=(${gpxFile2})
 		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
+	else
+		echo "No equals obejctid=${objectid} != relid=${relid}"
 	fi;
 
 	if [ ${#ways[@]} -eq 0 ] && [ ${#rels[@]} -eq 0 ]; then
@@ -399,15 +426,22 @@ function generateRelation {
 
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
-	local gpxrel=$(mktemp)
+	local gpxrel=$(mktemp --tmpdir=.)
 	echo "Create temporaly file $gpxrel" >&2
 	echo -e "${gpx_start}" > ${gpxrel}
+	if [ -z "${colour}" ]; then
+		echo -e "${xsiGarmin}" >> ${gpxrel}
+	else
+		echo -e "${xsiDefault}" >> ${gpxrel}
+	fi;
+	
+	
+	
 	echo -e "${gpx_metadata}" >> ${gpxrel}
 
-	
 	if [ ${#ways[@]} -ne 0 ]; then
 
-		echo -e "\t<trk>" >> "${relid}.gpx"  >> ${gpxrel}
+		echo -e "\t<trk>" >> ${gpxrel}
 		[ "${name}" != "" ] && echo -e "\t\t<name>${name}</name>" >> ${gpxrel}
 		[ "${note}" != "" ] && echo -e "\t\t<cmt>${note}</cmt>" >> ${gpxrel}
 		[ "${desc}" != "" ] && echo -e "\t\t<desc>${desc}</desc>" >> ${gpxrel}
@@ -439,6 +473,7 @@ function generateRelation {
 		echo -e "\t</trk>" >> ${gpxrel}
 	fi;
 
+#	echo "2. Wait for keypressed." >&2 && read -n 1 -t 15 a	
 	if [ ${#rels[@]} -ne 0 ]; then
 	#	awk 'flag{ if (/PAT2/){printf "%s", buf; flag=0; buf=""} else buf = buf $0 ORS}; /PAT1/{flag=1}' file
 		for wayfile in "${rels[@]}"; do
@@ -449,7 +484,7 @@ function generateRelation {
 		done
 	fi;
 	echo "</gpx>" >> ${gpxrel}
-	
+
 	# Check distance
 	if [ "${checkDistance}" == "true" ]; then
 		local masterdist=0
@@ -483,8 +518,16 @@ function generateRelation {
 		echo "GPX distance $masterdist km (${distance})"
 		[ ${distance:-0} == "0" ] || echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
 	fi;
-	cat ${gpxrel}
-	rm ${gpxrel}
+	if [ "${validate}" == "true" ]; then
+		gpxValidate ${gpxrel}
+		if [ $? -eq 0 ]; then
+			cat ${gpxrel}
+			rm -v ${gpxrel} >&2
+		fi;
+	else
+		cat ${gpxrel}
+		rm -v ${gpxrel} >&2
+	fi;
 }
 
 if [ "${type}" == "rel" ]; then
@@ -496,7 +539,7 @@ else
 		generateWay ${objectid} ${reverse} > ${gpxfile}
 		echo "Created GPX file ${gpxfile}"
 		if [ "${validate}" == "true" ]; then
-				xmllint --noout --schema http://www.topografix.com/GPX/1/1/gpx.xsd ${gpxfile} || echo "Bad validation!" >&2
+			gpxValidate ${gpxfile}
 		fi;
 		#gpxfile="${wayid}.gpx"
 #		echo "GPX to file> '${gpxfile}'" >&2
@@ -507,9 +550,6 @@ else
 	else
 		generateWay ${objectid} ${reverse}
 	fi;
-	
-	
-	
 fi;
 
 
