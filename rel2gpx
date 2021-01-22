@@ -76,13 +76,7 @@ function gpxValidate {
 	echo "GPX Validation ${file}" >&2
 	echo xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
 	xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
-	local status=$?
-	if [ $status -eq 0 ]; then
-		echo "GPX Validation ${file} OK" >&2
-	else
-		echo "GPX Validation ${file} Badly" >&2
-	fi
-	return $status
+	return $?
 }
 
 TMPDIR="./tmp"
@@ -137,11 +131,12 @@ gpx_start=$(cat <<EOM1
 	xmlns="http://www.topografix.com/GPX/1/1"
 EOM1
 )
-nameSpaceGpxx="xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\""
-xsiDefault='\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">'
-xsiGarmin='\txmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"\n\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd">'
 
-xsiGarmin=${xsiDefault}
+xsiDefault="\txsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\">"
+nameSpaceGpxx="xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\""
+#xsiGarmin='\txmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"\n\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd">'
+
+#xsiGarmin=${xsiDefault}
 
 if [ -z "${objectid}" ]; then
 	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
@@ -285,11 +280,7 @@ function generateWay {
 	fi;
 
 	echo -e "${gpx_start}"	
-	if [ -z "${colour}" ]; then
-		echo -e "${xsiGarmin}"
-	else
-		echo -e "${xsiDefault}"
-	fi;
+	echo -e "${xsiDefault}"
 
 	echo -e "${gpx_metadata}"
 	echo -e "\t${gpx_trkhead}"
@@ -429,13 +420,7 @@ function generateRelation {
 	local gpxrel=$(mktemp --tmpdir=.)
 	echo "Create temporaly file $gpxrel" >&2
 	echo -e "${gpx_start}" > ${gpxrel}
-	if [ -z "${colour}" ]; then
-		echo -e "${xsiGarmin}" >> ${gpxrel}
-	else
-		echo -e "${xsiDefault}" >> ${gpxrel}
-	fi;
-	
-	
+	echo -e "${xsiDefault}" >> ${gpxrel}
 	
 	echo -e "${gpx_metadata}" >> ${gpxrel}
 
@@ -523,6 +508,9 @@ function generateRelation {
 		if [ $? -eq 0 ]; then
 			cat ${gpxrel}
 			rm -v ${gpxrel} >&2
+		else
+			cat ${gpxrel} >&2
+			echo "BAD validation" >&2
 		fi;
 	else
 		cat ${gpxrel}
