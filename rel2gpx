@@ -5,13 +5,15 @@ export LC_NUMERIC=C
 #exec 2<&-
 # Open STDOUT as $LOG_FILE file for read and write.
 #exec 2<>/tmp/index.log
-touch tmp/relation/11880142.xml 
+#touch tmp/relation/11880142.xml 
 
 osmurl="https://www.openstreetmap.org/api/0.6"
 
 #echo "Our temp file is ${TMPDIR}" >&2
 parted=false;
 validate=true;
+garmin=true;
+
 function distance () {
 	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
 	local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
@@ -97,6 +99,9 @@ while [ $# -ne 0 ]; do
 		--parted|-p)
 			parted=true
 			;;
+		--garmin|-g)
+			garmin=true
+			;;
 		--dir|-d)
 			TMPDIR=$1
 			;;
@@ -133,18 +138,20 @@ EOM1
 )
 
 xsiDefault="\txsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\">"
-nameSpaceGpxx="xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\""
+nameSpaceGarmin="xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\""
+nameSpaceStyle="xmlns:gpx_style=\"http://www.topografix.com/GPX/gpx_style/0/2\""
 #xsiGarmin='\txmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"\n\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd">'
 
 #xsiGarmin=${xsiDefault}
 
 if [ -z "${objectid}" ]; then
-	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
+	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--garmin|-g] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
 	echo -e "\tconvert osm relation to gpx" >&2
-#	echo -e "\t--reverse|-r\t: reverse path (only way), default: false" >&2
-	echo -e "\t--parted|-p\t: division path (only relation), default: false" >&2
+#	echo -e "\t--reverse|-r\t: reverse path (only way)" >&2
+	echo -e "\t--parted|-p\t: division path (only relation)" >&2
+	echo -e "\t--garmin|-g\t: colour extensions as garmin" >&2
 #	echo -e "\t--output|-o gpxfile\t: export to file" >&2
-	echo -e "\t--validate|-v\t: export with GPX validation, default: false" >&2
+	echo -e "\t--validate|-v\t: export with GPX validation" >&2
 	echo -e "\trel|r\t: numberofobject is relation (default)" >&2
 	echo -e "\tway|w\t: numberofobject is way" >&2
 	echo -e "\nExample\t$0 -r 327119963" >&2
@@ -257,7 +264,8 @@ function generateWay {
 	local gpx_metadata="\t<metadata>\n\t</metadata>"
 	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
-	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
+#	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>rel2gpx</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"© OpenStreetMap contributors\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
 	echo "src='${website}'"
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
@@ -270,15 +278,7 @@ function generateWay {
 	gpx_trkhead="${gpx_trkhead}\n\t\t<link href=\"https://www.openstreetmap.org/way/${wayid}\"><text>${wayid}</text></link>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<type>${type1}</type>"
 
-
-	colour=$(checkGarminColour ${colour})
-	if [ $? -eq 0 ]; then
-		echo "Set color: ${colour}" >&2
-		local gpxcolor="<gpxx:DisplayColors>${colour}</gpxx:DisplayColors>"
-		local gpxx="\t\t\t<gpxx:TrackExtension ${nameSpaceGpxx}>\n\t\t\t\t${gpxcolor}\n\t\t\t</gpxx:TrackExtension>"
-		gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n${gpxx}\n\t\t</extensions>"
-	fi;
-
+	
 	echo -e "${gpx_start}"	
 	echo -e "${xsiDefault}"
 
@@ -352,8 +352,8 @@ function generateRelation {
 			echo "Add relation ${gpxFile2}" >&2
 			rels+=(${gpxFile2})
 		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
-	else
-		echo "No equals obejctid=${objectid} != relid=${relid}"
+#	else
+#		echo "No equals obejctid=${objectid} != relid=${relid}"
 	fi;
 
 	if [ ${#ways[@]} -eq 0 ] && [ ${#rels[@]} -eq 0 ]; then
@@ -401,18 +401,30 @@ function generateRelation {
 	local gpx_metadata="\t<metadata>\n\t</metadata>"
 	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
-	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
+#	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>rel2gpx</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"© OpenStreetMap contributors\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	[ "${name}" != "" ] && echo "Name: ${name}" >&2
 	[ "${operator}" != "" ] && echo "Operator: ${operator}" >&2
 	[ "${network}" != "" ] && echo "Network: ${network}" >&2
-	colour=$(checkGarminColour ${colour})
-	if [ $? -eq 0 ]; then
-		echo "Color: ${colour}" >&2
-		extension="<extensions>\n\t\t\t<gpxx:TrackExtension xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\">\n\t\t\t\t<gpxx:DisplayColor>${colour}</gpxx:DisplayColor>\n\t\t\t</gpxx:TrackExtension>\n\t\t</extensions>"
-#		gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t${extension}\n\t</metadata>"}
+
+	if [ "${colour}" != "" ]; then
+		local extensions;
+		if [ "${garmin}" == true ]; then
+			colour=$(checkGarminColour ${colour})
+			if [ $? -eq 0 ]; then
+				echo "Set GARMIN color: ${colour}" >&2
+				local gpxcolor="<gpxx:DisplayColors>${colour}</gpxx:DisplayColors>"
+				extension="\t\t\t<gpxx:TrackExtension ${nameSpaceGarmin}>\n\t\t\t\t${gpxcolor}\n\t\t\t</gpxx:TrackExtension>"
+			fi;
+		else
+			echo "Set color style: ${colour}" >&2
+			local styleColor="<gpx_style:color>${colour}</gpx_style:color>"
+			extension="\t\t\t<gpx_style:line ${nameSpaceStyle}>\n\t\t\t\t${styleColor}\n\t\t\t</gpx_style:line>"
+		fi;
+		[ "${extension}" != "" ] && gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n${extension}\n\t\t</extensions>"
 	fi;
 
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
