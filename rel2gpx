@@ -14,20 +14,8 @@ parted=false;
 validate=true;
 garmin=true;
 
-function distance () {
-	local lat1=$(bc -l <<< "${1%,*} * 0.01745329251994329444")
-	local lat2=$(bc -l <<< "${2%,*} * 0.01745329251994329444")
-        local dlon=`bc -l <<< "(${2##*,} - ${1##*,}) * 0.01745329251994329444"`
-	local distance=$(bc -l <<< "s($lat1) * s($lat2) + c($lat1) * c($lat2) * c($dlon)")
-	distance=$(bc -l <<<"1.5707963267948965 - a($distance / sqrt(1 - $distance * $distance))")
-	distance=$(bc -l <<<"scale=4; ($distance * 6371 + 0.00005) / 1")
-	echo $distance | awk '{printf "%1.4f\n", $1}'
-}
-
-function addFloat {
-	num=$(bc -l <<<"scale=4; ($1 + $2)")
-	echo $num | awk '{printf "%1.4f\n", $1}'
-}
+declare -A colorMap                              # Or declare separately
+colorMap=( [black]=000000 [silver]=C0C0C0 [gray]=808080 [white]=FFFFFF [maroon]=800000 [red]=FF0000 [purple]=800080 [fuchsia]=FF00FF [green]=008000 [lime]=00FF00 [olive]=808000 [yellow]=FFFF00 [navy]=000080 [blue]=0000FF [teal]=008080 [aqua]=00FFFF ) # Then initialise
 
 function checkFileTime {
 	local file=$1
@@ -37,13 +25,13 @@ function checkFileTime {
 		local fileTime=$(stat --format='%Y' "${file}")
 		local currTime=$(date +%s)
 		diffTime=$(($currTime-$fileTime));
-	        echo "The $file is "$(bc -l <<<"scale=1;$diffTime/3600")" hour(s) old." >&2
+	        echo "The $file is "$(bc -l <<<"scale=0;$diffTime/60")" minute(s) old." >&2
 	        diffTime=$((${diffTime}-${maxTime}));
 		if [ ${diffTime} -ge 0 ]; then
 		        return 1;
 		fi;
 	else
-	        echo "The $file not found!" >&2
+#	        echo "The $file not found!" >&2
 	        return 1;
 	fi;
 }
@@ -56,17 +44,19 @@ function downloadOsmPart {
 	if [ $? -ne 0 ]; then
 		http=$(curl --silent --head "${osmurl}/${1}" | grep "HTTP\/[1-2].* [2\d\d]")
 		if [ $? -ne 0 ]; then
-        		echo -e "ERROR ${osmurl}/${1}\n url not found!" >&2
-        		if [ -e ${filename} ]; then
-       				echo "Use cache older file ${filename}" >&2
-       				return 0;
-       			fi;
+        		echo -e "Url not found! ${osmurl}/${1}" >&2
+        		touch ${filename}
         		return 1;
         	fi
         	echo "Download ... ${osmurl}/${1}" >&2
         	curl --silent "${osmurl}/${1}" -o ${filename}
         	local status=$?
         else
+        	local size=$(stat -c%s "${filename}")
+        	if [ $size -eq 0 ]; then
+        		echo -e "Cache: Url not found! ${osmurl}/${1}" >&2
+        		return 1;
+        	fi;
 		echo "Use cache file ${filename}" >&2
 	fi;
 #	ls -la ${filename} >&2
@@ -76,7 +66,7 @@ function downloadOsmPart {
 function gpxValidate {
 	local file=$1;
 	echo "GPX Validation ${file}" >&2
-	echo xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
+#	echo xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
 	xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
 	return $?
 }
@@ -105,19 +95,8 @@ while [ $# -ne 0 ]; do
 		--dir|-d)
 			TMPDIR=$1
 			;;
-		rel*|r*)
-			objectid=${1/"rel"/"r"}
-			objectid=${objectid:1}
-			type="rel"
-			;;
-		way*|w*)
-			objectid=${1/"way"/"w"}
-			objectid=${objectid:1}
-			type="way"
-			;;
 		*)
 			objectid=${1}
-			type="rel"
 			;;
 	esac
 	shift
@@ -145,15 +124,13 @@ nameSpaceStyle="xmlns:gpx_style=\"http://www.topografix.com/GPX/gpx_style/0/2\""
 #xsiGarmin=${xsiDefault}
 
 if [ -z "${objectid}" ]; then
-	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--garmin|-g] [--output|-o file.gpx] [rel|r][way|w]numberofobject" >&2
+	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--garmin|-g] [--output|-o file.gpx] numberOfObject" >&2
 	echo -e "\tconvert osm relation to gpx" >&2
 #	echo -e "\t--reverse|-r\t: reverse path (only way)" >&2
 	echo -e "\t--parted|-p\t: division path (only relation)" >&2
 	echo -e "\t--garmin|-g\t: colour extensions as garmin" >&2
 #	echo -e "\t--output|-o gpxfile\t: export to file" >&2
 	echo -e "\t--validate|-v\t: export with GPX validation" >&2
-	echo -e "\trel|r\t: numberofobject is relation (default)" >&2
-	echo -e "\tway|w\t: numberofobject is way" >&2
 	echo -e "\nExample\t$0 -r 327119963" >&2
 	echo -e "\t$0 rel6452264" >&2
 	exit 1;
@@ -191,6 +168,9 @@ function generateWay {
 	local osmfile=$(downloadOsmPart way/${wayid}/full)
 	[ "$osmfile" == "" ] && exit 1
 
+	local gpxFile=$(mktemp --tmpdir="./")
+	trap 'rm -rf "${gpxFile}"' EXIT
+	
 	echo "Extract data from '${osmfile}' $isReverse" >&2
 	isReverse=${isReverse/"backward"/"true"}
 	
@@ -201,7 +181,7 @@ function generateWay {
 	local note=$(grep -oP '<tag(.*) k=\"note\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local type1=$(grep -oP '<tag(.*) k=\"highway\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local website=$(grep -oP '<tag(.*) k=\"website\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
-	local colour=$(grep -oP '<tag(.*) k=\"colour\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+#	local colour=$(grep -oP '<tag(.*) k=\"colour\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local author=$(grep -oP '<way(.*) user="\K[^"]*' ${osmfile} | tr -d '\n')
 	local wayts=$(grep -oP '<way(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
 
@@ -267,47 +247,46 @@ function generateWay {
 #	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>rel2gpx</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"© OpenStreetMap contributors\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
-	echo "src='${website}'"
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
-	gpx_trkhead="<trk>"
+	local gpx_trkhead="<trk>"
 	[ "$name" != "" ] && gpx_trkhead="${gpx_trkhead}\n\t\t<name>$name</name>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<src>OpenStreetMap</src>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<link href=\"https://www.openstreetmap.org/way/${wayid}\"><text>${wayid}</text></link>"
 	gpx_trkhead="${gpx_trkhead}\n\t\t<type>${type1}</type>"
-
 	
-	echo -e "${gpx_start}"	
-	echo -e "${xsiDefault}"
+	echo -e "${gpx_start}" > ${gpxFile}
+	echo -e "${xsiDefault}" >> ${gpxFile}
 
-	echo -e "${gpx_metadata}"
-	echo -e "\t${gpx_trkhead}"
-	echo -e "\t\t<trkseg>"
-
+	echo -e "${gpx_metadata}" >> ${gpxFile}
+	echo -e "\t${gpx_trkhead}" >> ${gpxFile}
+	echo -e "\t\t<trkseg>" >> ${gpxFile}
 	for ((i = 0; i < ${#nodes[@]}; i++)); do
 		n=${nodes[$i]};
 		coordinate=${coordinates[$n]};
-		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>"
-		
-#		if [ $i -ne 0 ]; then
-#			dist=$(distance $lastcoo ${coordinates[$n]})
-#			sumdist=$(echo "${sumdist:-0} + $dist" | bc -l)
-			#echo " $dist $sumdist"
-#		fi;
-#		lastcoo=${coordinate}
+		echo -e "\t\t\t<trkpt lat=\"${coordinate%,*}\" lon=\"${coordinate##*,}\"/>" >> ${gpxFile}
 	done
-	echo -e "\t\t</trkseg>"
-	echo -e "\t</trk>"
-	echo -e "</gpx>"
-	echo $sumdist | awk '{printf "Distance %1.4f km\n", $1}' >&2
+	echo -e "\t\t</trkseg>" >> ${gpxFile}
+	echo -e "\t</trk>" >> ${gpxFile}
+	echo -e "</gpx>" >> ${gpxFile}
+	echo ${#nodes[@]}"x coordinates." >&2
+	
+	gpxValidate ${gpxFile}
+	if [ $? -eq 0 ]; then
+		cat ${gpxFile}
+	else
+		cat ${gpxFile} >&2
+		echo "BAD validation!" >&2
+		return 1;
+	fi;
 }
 
 function generateRelation {
 	local relid=$1
 	local osmfile=$(downloadOsmPart relation/${relid})
-	[ "$osmfile" == "" ] && exit 1
+	[ "$osmfile" == "" ] && return 1
 	local patternTrkSeg="/<trkseg>/{flag=1; next} /<\/trkseg>/{flag=0} flag"
 	local patternTrk="/<trk>/{flag=1; next} /<\/trk>/{flag=0} flag"
 	
@@ -339,6 +318,7 @@ function generateRelation {
 		ways+=(${gpxFile})
 	done < ${WAYSFILE}
 	rm -vf ${WAYSFILE} >&2
+	exit 5
 	echo "obejctid=${objectid} relid=${relid}" >&2
 	local rels=()
 	if [ "${objectid}" == "${relid}" ] && [ "${type}" == "network" ]; then
@@ -402,29 +382,41 @@ function generateRelation {
 	[ "${name}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<name>${name}</name>\n\t</metadata>"}
 	[ "${desc}${note}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<desc>${desc}${note}</desc>\n\t</metadata>"}
 #	[ "${author}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>${author}</name>\n\t\t</author>\n\t</metadata>"}
-	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>rel2gpx</name>\n\t\t</author>\n\t</metadata>"}
+	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<author>\n\t\t\t<name>$USER</name>\n\t\t</author>\n\t</metadata>"}
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<copyright author=\"© OpenStreetMap contributors\">\n\t\t\t<year>${year}</year>\n\t\t\t<license>https://opendatacommons.org/licenses/odbl/</license>\n\t\t</copyright>\n\t</metadata>"}
 	[ "${website}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<link href=\"${website}\"/>\n\t</metadata>"}
 	[ "${lastts}" != "" ] && gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<time>${lastts}</time>\n\t</metadata>"}
 	[ "${name}" != "" ] && echo "Name: ${name}" >&2
 	[ "${operator}" != "" ] && echo "Operator: ${operator}" >&2
 	[ "${network}" != "" ] && echo "Network: ${network}" >&2
+	
+	local extensions;
 
 	if [ "${colour}" != "" ]; then
-		local extensions;
 		if [ "${garmin}" == true ]; then
 			colour=$(checkGarminColour ${colour})
 			if [ $? -eq 0 ]; then
-				echo "Set GARMIN color: ${colour}" >&2
+				echo "Set Garmin color: ${colour}" >&2
 				local gpxcolor="<gpxx:DisplayColors>${colour}</gpxx:DisplayColors>"
 				extension="\t\t\t<gpxx:TrackExtension ${nameSpaceGarmin}>\n\t\t\t\t${gpxcolor}\n\t\t\t</gpxx:TrackExtension>"
 			fi;
 		else
-			echo "Set color style: ${colour}" >&2
-			local styleColor="<gpx_style:color>${colour}</gpx_style:color>"
-			extension="\t\t\t<gpx_style:line ${nameSpaceStyle}>\n\t\t\t\t${styleColor}\n\t\t\t</gpx_style:line>"
+			echo "Color style: ${colour}" >&2
+			colour=${colour,,}
+			${colorMap[red]}
+			echo ${colour} | grep "^#\?[0-9a-f]\{6\}$" > /dev/null
+			if [ $? -ne 0 ]; then
+				colour=${colorMap[${colour}]}
+			else
+				colour=${colour#\#}
+			fi;
+			if [ "${colour}" != "" ]; then
+				echo "Set color: "${colour,,}
+				local styleColor="<gpx_style:color>${colour,,}</gpx_style:color>"
+				extension="\t\t\t<gpx_style:line ${nameSpaceStyle}>\n\t\t\t\t${styleColor}\n\t\t\t</gpx_style:line>"
+			fi;
 		fi;
-		[ "${extension}" != "" ] && gpx_trkhead="${gpx_trkhead}\n\t\t<extensions>\n${extension}\n\t\t</extensions>"
+		[ "${extension}" != "" ] && extensions="\n\t\t<extensions>\n${extension}\n\t\t</extensions>"
 	fi;
 
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
@@ -530,30 +522,15 @@ function generateRelation {
 	fi;
 }
 
-if [ "${type}" == "rel" ]; then
-	echo "Generate relation id=${objectid}" >&2
-	generateRelation ${objectid}
-else
-	echo "Generate way id=${objectid}" >&2
-	if [ "${gpxfile}" != "" ]; then
-		generateWay ${objectid} ${reverse} > ${gpxfile}
-		echo "Created GPX file ${gpxfile}"
-		if [ "${validate}" == "true" ]; then
-			gpxValidate ${gpxfile}
-		fi;
-		#gpxfile="${wayid}.gpx"
+echo "Generate relation id=${objectid}" >&2
+generateRelation ${objectid} && exit 0;
+
+echo "Generate way id=${objectid}" >&2
+generateWay ${objectid} ${reverse} 
+
+#	gpxfile="${wayid}.gpx"
 #		echo "GPX to file> '${gpxfile}'" >&2
 #		exec 3<&-
-	#	Open STDOUT as $LOG_FILE file for read and write.
+#	Open STDOUT as $LOG_FILE file for read and write.
 #		exec 3<>${gpxfile}
 #		echo "Create GPX file ${gpxfile}" >&2
-	else
-		generateWay ${objectid} ${reverse}
-	fi;
-fi;
-
-
-
-
-
-
