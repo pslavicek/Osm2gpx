@@ -12,7 +12,7 @@ osmurl="https://www.openstreetmap.org/api/0.6"
 #echo "Our temp file is ${TMPDIR}" >&2
 parted=false;
 validate=true;
-garmin=true;
+garmin=trueX;
 
 declare -A colorMap                              # Or declare separately
 colorMap=( [black]=000000 [silver]=C0C0C0 [gray]=808080 [white]=FFFFFF [maroon]=800000 [red]=FF0000 [purple]=800080 [fuchsia]=FF00FF [green]=008000 [lime]=00FF00 [olive]=808000 [yellow]=FFFF00 [navy]=000080 [blue]=0000FF [teal]=008080 [aqua]=00FFFF ) # Then initialise
@@ -276,6 +276,7 @@ function generateWay {
 	gpxValidate ${gpxFile}
 	if [ $? -eq 0 ]; then
 		cat ${gpxFile}
+		echo "GPX valid" >&2
 	else
 		cat ${gpxFile} >&2
 		echo "BAD validation!" >&2
@@ -314,11 +315,10 @@ function generateRelation {
 		local role=$(echo -n $line | grep -oP '<member(.*) type=\"way\"(.*) role="\K[^"]*')
 		local gpxFile="${TMPDIR}/gpx/${refway}-${role}.gpx"
 		checkFileTime ${gpxFile} || generateWay ${refway} ${role} > ${gpxFile}
-#		echo "GPX: ${gpxFile}" >&2
+		echo "GPX: ${gpxFile}" >&2
 		ways+=(${gpxFile})
 	done < ${WAYSFILE}
 	rm -vf ${WAYSFILE} >&2
-	exit 5
 	echo "obejctid=${objectid} relid=${relid}" >&2
 	local rels=()
 	if [ "${objectid}" == "${relid}" ] && [ "${type}" == "network" ]; then
@@ -397,7 +397,7 @@ function generateRelation {
 			colour=$(checkGarminColour ${colour})
 			if [ $? -eq 0 ]; then
 				echo "Set Garmin color: ${colour}" >&2
-				local gpxcolor="<gpxx:DisplayColors>${colour}</gpxx:DisplayColors>"
+				local gpxcolor="<gpxx:DisplayColor>${colour}</gpxx:DisplayColor>"
 				extension="\t\t\t<gpxx:TrackExtension ${nameSpaceGarmin}>\n\t\t\t\t${gpxcolor}\n\t\t\t</gpxx:TrackExtension>"
 			fi;
 		else
@@ -411,17 +411,19 @@ function generateRelation {
 				colour=${colour#\#}
 			fi;
 			if [ "${colour}" != "" ]; then
-				echo "Set color: "${colour,,}
+				echo "Set color: "${colour,,} >&2
 				local styleColor="<gpx_style:color>${colour,,}</gpx_style:color>"
 				extension="\t\t\t<gpx_style:line ${nameSpaceStyle}>\n\t\t\t\t${styleColor}\n\t\t\t</gpx_style:line>"
 			fi;
 		fi;
-		[ "${extension}" != "" ] && extensions="\n\t\t<extensions>\n${extension}\n\t\t</extensions>"
 	fi;
 
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
-	local gpxrel=$(mktemp --tmpdir=.)
+	local gpxrel=$(mktemp --tmpdir="./")
+	trap 'rm -rf "${gpxrel}"' EXIT
+	
+	
 	echo "Create temporaly file $gpxrel" >&2
 	echo -e "${gpx_start}" > ${gpxrel}
 	echo -e "${xsiDefault}" >> ${gpxrel}
@@ -442,7 +444,7 @@ function generateRelation {
 		fi;
 		echo -e "\t\t<number>${relid}</number>" >> ${gpxrel}
 		echo -e "\t\t<type>path</type>" >> ${gpxrel}
-		[ "${extension}" != "" ] && echo -e "\t\t${extension}" >> ${gpxrel}
+		[ "${extension}" != "" ] && echo -e "\t\t<extensions>\n${extension}\n\t\t</extensions>" >> ${gpxrel}
 		if [ "${parted}" == "true" ]; then
 			for wayfile in "${ways[@]}"; do
 				echo "Extract <trkseg> from ${wayfile}" >&2
@@ -507,18 +509,14 @@ function generateRelation {
 		echo "GPX distance $masterdist km (${distance})"
 		[ ${distance:-0} == "0" ] || echo "Distance in OSM relation($relid) is $distance km (diff "$(bc -l <<<"scale=1;100*${masterdist:-0}/${distance}")"%)"
 	fi;
-	if [ "${validate}" == "true" ]; then
-		gpxValidate ${gpxrel}
-		if [ $? -eq 0 ]; then
-			cat ${gpxrel}
-			rm -v ${gpxrel} >&2
-		else
-			cat ${gpxrel} >&2
-			echo "BAD validation" >&2
-		fi;
-	else
+	gpxValidate ${gpxrel}
+	if [ $? -eq 0 ]; then
 		cat ${gpxrel}
-		rm -v ${gpxrel} >&2
+		echo "GPX valid" >&2
+	else
+		cat ${gpxrel} >&2
+		echo "BAD validation!" >&2
+		return 1;
 	fi;
 }
 
