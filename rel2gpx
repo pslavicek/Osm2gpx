@@ -5,7 +5,7 @@ export LC_NUMERIC=C
 #exec 2<&-
 # Open STDOUT as $LOG_FILE file for read and write.
 #exec 2<>/tmp/index.log
-#touch tmp/relation/11880142.xml 
+touch tmp/relation/11880142.xml 
 
 osmurl="https://www.openstreetmap.org/api/0.6"
 
@@ -119,6 +119,7 @@ EOM1
 xsiDefault="\txsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\">"
 nameSpaceGarmin="xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\""
 nameSpaceStyle="xmlns:gpx_style=\"http://www.topografix.com/GPX/gpx_style/0/2\""
+nameSpaceSla="xmlns:slainfo=\"https://osm.slavics.cz/xsd/slainfo/1\""
 #xsiGarmin='\txmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"\n\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd">'
 
 #xsiGarmin=${xsiDefault}
@@ -302,6 +303,7 @@ function generateRelation {
 	local relts=$(grep -oP '<rel(.*) timestamp="\K[^"]*' ${osmfile} | tr -d '\n')
 	local operator=$(grep -oP '<tag(.*) k=\"operator\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 	local type=$(grep -oP '<tag(.*) k=\"type\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
+	local oneway=$(grep -oP '<tag(.*) k=\"oneway\"(.*) v="\K[^"]*' ${osmfile} | tr -d '\n')
 
 	echo "Extract ways from ${osmfile}" >&2
 	local WAYSFILE=$(mktemp) || exit 1
@@ -331,6 +333,7 @@ function generateRelation {
 			echo "gpxFile2=${gpxFile2}" >&2
 			generateRelation ${line} > ${gpxFile2}
 			echo "Add relation ${gpxFile2}" >&2
+			zip -uv ${objectid}.zip ${gpxFile2} >&2
 			rels+=(${gpxFile2})
 		done < <(grep -oP '<member(.*) type=\"relation\"(.*) ref="\K[^"]*' ${osmfile})
 #	else
@@ -418,7 +421,14 @@ function generateRelation {
 			fi;
 		fi;
 	fi;
-
+	if [ "${oneway}" == "yes" ]; then
+		local extension2="\t\t\t<slainfo:way ${nameSpaceSla}>\n\t\t\t\t<slainfo:oneway>yes</slainfo:oneway>\n\t\t\t</slainfo:way>"
+		if [ "${extension}" = "" ]; then
+			extension="${extension}${extension2}"
+		else
+			extension="${extension}\n${extension2}"
+		fi;
+	fi;
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
 	local gpxrel=$(mktemp --tmpdir="./")
@@ -470,7 +480,7 @@ function generateRelation {
 			echo "Extract <trk> from ${wayfile}" >&2
 			echo -e "\t<trk>" >> ${gpxrel}
 			awk "${patternTrk}" "${wayfile}" >> ${gpxrel}
-			echo -e "\n\t</trk>" >> ${gpxrel}
+			echo -e "\t</trk>" >> ${gpxrel}
 		done
 	fi;
 	echo "</gpx>" >> ${gpxrel}
