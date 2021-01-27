@@ -169,7 +169,6 @@ function generateWay {
 	[ "$osmfile" == "" ] && exit 1
 
 	local gpxFile=$(mktemp --tmpdir="./")
-	trap 'rm -rf "${gpxFile}"' EXIT
 	
 	echo "Extract data from '${osmfile}' $isReverse" >&2
 	isReverse=${isReverse/"backward"/"true"}
@@ -277,8 +276,10 @@ function generateWay {
 	if [ $? -eq 0 ]; then
 		cat ${gpxFile}
 		echo "GPX valid" >&2
+		rm ${gpxFile}
 	else
 		cat ${gpxFile} >&2
+		rm ${gpxFile}
 		echo "BAD validation!" >&2
 		return 1;
 	fi;
@@ -421,8 +422,6 @@ function generateRelation {
 	gpx_metadata=${gpx_metadata/"\t</metadata>"/"\t\t<bounds minlat=\"${latmin}\" maxlat=\"${latmax}\" minlon=\"${lonmin}\" maxlon=\"${lonmax}\"/>\n\t</metadata>"}
 
 	local gpxrel=$(mktemp --tmpdir="./")
-	trap 'rm -rf "${gpxrel}"' EXIT
-	
 	
 	echo "Create temporaly file $gpxrel" >&2
 	echo -e "${gpx_start}" > ${gpxrel}
@@ -512,9 +511,11 @@ function generateRelation {
 	gpxValidate ${gpxrel}
 	if [ $? -eq 0 ]; then
 		cat ${gpxrel}
+		rm ${gpxrel}
 		echo "GPX valid" >&2
 	else
 		cat ${gpxrel} >&2
+		rm ${gpxrel}
 		echo "BAD validation!" >&2
 		return 1;
 	fi;
