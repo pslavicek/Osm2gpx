@@ -5,7 +5,8 @@ export LC_NUMERIC=C
 #exec 2<&-
 # Open STDOUT as $LOG_FILE file for read and write.
 #exec 2<>/tmp/index.log
-touch tmp/relation/11880142.xml 
+touch tmp/relation/11880142.xml
+rm -rf tmp/gpx
 
 osmurl="https://www.openstreetmap.org/api/0.6"
 
@@ -119,7 +120,7 @@ EOM1
 xsiDefault="\txsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\">"
 nameSpaceGarmin="xmlns:gpxx=\"http://www.garmin.com/xmlschemas/GpxExtensions/v3\""
 nameSpaceStyle="xmlns:gpx_style=\"http://www.topografix.com/GPX/gpx_style/0/2\""
-nameSpaceSla="xmlns:slainfo=\"https://osm.slavics.cz/xsd/slainfo/1\""
+nameSpaceSla="xmlns:osminfo=\"https://osm.slavics.cz/xsd/osminfo/OsmInfoV1\""
 #xsiGarmin='\txmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"\n\txsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd">'
 
 #xsiGarmin=${xsiDefault}
@@ -407,7 +408,6 @@ function generateRelation {
 		else
 			echo "Color style: ${colour}" >&2
 			colour=${colour,,}
-			${colorMap[red]}
 			echo ${colour} | grep "^#\?[0-9a-f]\{6\}$" > /dev/null
 			if [ $? -ne 0 ]; then
 				colour=${colorMap[${colour}]}
@@ -422,7 +422,7 @@ function generateRelation {
 		fi;
 	fi;
 	if [ "${oneway}" == "yes" ]; then
-		local extension2="\t\t\t<slainfo:way ${nameSpaceSla}>\n\t\t\t\t<slainfo:oneway>yes</slainfo:oneway>\n\t\t\t</slainfo:way>"
+		local extension2="\t\t\t<osminfo:way ${nameSpaceSla}>\n\t\t\t\t<osminfo:oneway>true</osminfo:oneway>\n\t\t\t</osminfo:way>"
 		if [ "${extension}" = "" ]; then
 			extension="${extension}${extension2}"
 		else

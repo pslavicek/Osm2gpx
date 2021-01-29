@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- slainfoV1.xsd version 1.0: Public GPX extensions for ways -->
+<xsd:schema
+	xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+	xmlns="https://osm.slavics.cz/xsd/osminfo/OsmInfoV1"
+	targetNamespace="https://osm.slavics.cz/xsd/osminfo/OsmInfoV1"
+	elementFormDefault="qualified">
+
+	<xsd:element name="way" type="wayType">
+		<xsd:annotation>
+			<xsd:documentation>
+				Graphical style for a OSM way feature (route, track, border of filled object, etc). 
+			</xsd:documentation>
+		</xsd:annotation>
+	</xsd:element>
+
+	<xsd:complexType name="wayType">
+		<xsd:annotation>
+			<xsd:documentation>
+				Graphical style for a OSM way feature (route, track, border of filled object, etc). 
+			</xsd:documentation>
+		</xsd:annotation>
+		<xsd:sequence>	<!-- elements must appear in this order -->
+			<xsd:element name="oneway" type="xsd:boolean" minOccurs="0"/>
+		</xsd:sequence>
+	</xsd:complexType>
+	
+</xsd:schema> 

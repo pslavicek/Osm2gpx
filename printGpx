@@ -1,0 +1,24 @@
+#!/bin/bash
+export LC_NUMERIC=C
+
+# Close STDERR FD
+#exec 2<&-
+# Open STDOUT as $LOG_FILE file for read and write.
+#exec 2<>/tmp/index.log
+
+function extractFilename {
+	local filename=$(basename -- "${1}")
+	echo ${filename%.*}
+}
+
+#https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
+
+gpxMainFile=$1
+gpxDir=$(extractFilename ${gpxMainFile})
+
+echo "gpxMainFile=$gpxMainFile"
+echo "gpxDir=$gpxDir"
+cat -n ${gpxMainFile}
+
+echo "##############"
+sed -n "/<\?xml*/,/<\trk>/p"  ${gpxMainFile}
