@@ -5,7 +5,7 @@ export LC_NUMERIC=C
 #exec 2<&-
 # Open STDOUT as $LOG_FILE file for read and write.
 #exec 2<>/tmp/index.log
-touch tmp/relation/11880142.xml
+[ -e "tmp/relation/11880142.xml" ] && touch tmp/relation/11880142.xml
 rm -rf tmp/gpx
 
 osmurl="https://www.openstreetmap.org/api/0.6"
@@ -55,7 +55,7 @@ function downloadOsmPart {
         else
         	local size=$(stat -c%s "${filename}")
         	if [ $size -eq 0 ]; then
-        		echo -e "Cache: Url not found! ${osmurl}/${1}" >&2
+        		echo -e "Cache: File ${filename} is empty!" >&2
         		return 1;
         	fi;
 		echo "Use cache file ${filename}" >&2
