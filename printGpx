@@ -15,10 +15,26 @@ function extractFilename {
 
 gpxMainFile=$1
 gpxDir=$(extractFilename ${gpxMainFile})
+gpxHead=$(mktemp)
 
 echo "gpxMainFile=$gpxMainFile"
 echo "gpxDir=$gpxDir"
 cat -n ${gpxMainFile}
-
+cat -n ${gpxMainFile} | grep "<trk>"
 echo "##############"
-sed -n "/<\?xml*/,/<\trk>/p"  ${gpxMainFile}
+awk "/<\?xml/{flag=1} /<trk>/{flag=0} flag" ${gpxMainFile}
+
+#while IFS= read -r line; do
+#	echo "Line ${line}" >&2
+#done < <(grep -Fn "trk>" ${gpxMainFile} | cut -d ":" -f1)
+
+trk_array=( $(grep -Fn "trk>" ${gpxMainFile} | cut -d ":" -f1) )
+
+for i in `seq 0 2 $((${#trk_array[@]}-1))`; do
+     echo "Interval TRK ${trk_array[$i]}-${trk_array[$((i+1))]}"
+done
+
+
+rm -f ${gpxHead}
+
+
