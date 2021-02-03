@@ -11,7 +11,7 @@ rm -rf tmp/gpx
 osmurl="https://www.openstreetmap.org/api/0.6"
 
 #echo "Our temp file is ${TMPDIR}" >&2
-parted=false;
+print=true;
 validate=true;
 garmin=trueX;
 
@@ -66,7 +66,12 @@ function downloadOsmPart {
 
 function gpxValidate {
 	local file=$1;
-	echo "GPX Validation ${file}" >&2
+	command -V echo &>/dev/null
+	if [ $? -ne 0 ]; then
+		echo "GPX validation: xmllint not found!" >&2
+		return 0;
+	fi;
+	echo "GPX validation ${file}" >&2
 #	echo xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
 	xmlstarlet validate --xsd "xsd/validation.xsd" --err ${file} >&2
 	return $?
@@ -87,8 +92,8 @@ while [ $# -ne 0 ]; do
 		--validate|-v)
 			validate=true
 			;;
-		--parted|-p)
-			parted=true
+		--printmap|-pm)
+			print=true
 			;;
 		--garmin|-g)
 			garmin=true
@@ -126,10 +131,10 @@ nameSpaceSla="xmlns:osminfo=\"https://osm.slavics.cz/xsd/osminfo/OsmInfoV1\""
 #xsiGarmin=${xsiDefault}
 
 if [ -z "${objectid}" ]; then
-	echo -e "$0 [--reverse|-r] [--validation|-v] [--parted|-p] [--garmin|-g] [--output|-o file.gpx] numberOfObject" >&2
+	echo -e "$0 [--reverse|-r] [--validation|-v] [--printmap|-pm] [--garmin|-g] [--output|-o file.gpx] numberOfObject" >&2
 	echo -e "\tconvert osm relation to gpx" >&2
 #	echo -e "\t--reverse|-r\t: reverse path (only way)" >&2
-	echo -e "\t--parted|-p\t: division path (only relation)" >&2
+	echo -e "\t--printmap|-pm\t: extract printmap data to .yml file" >&2
 	echo -e "\t--garmin|-g\t: colour extensions as garmin" >&2
 #	echo -e "\t--output|-o gpxfile\t: export to file" >&2
 	echo -e "\t--validate|-v\t: export with GPX validation" >&2
@@ -454,22 +459,14 @@ function generateRelation {
 		echo -e "\t\t<number>${relid}</number>" >> ${gpxrel}
 		echo -e "\t\t<type>path</type>" >> ${gpxrel}
 		[ "${extension}" != "" ] && echo -e "\t\t<extensions>\n${extension}\n\t\t</extensions>" >> ${gpxrel}
-		if [ "${parted}" == "true" ]; then
-			for wayfile in "${ways[@]}"; do
-				echo "Extract <trkseg> from ${wayfile}" >&2
-				# Include trkseg
-				sed -n "/<trkseg>/,/<\/trkseg>/p" "${wayfile}" >> ${gpxrel}
-			done
-		else
-			echo -e "\t\t<trkseg>" >> ${gpxrel}
-	# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
-			for wayfile in "${ways[@]}"; do
-				#echo "A3 ${wayfile}" >&2
-				awk "${patternTrkSeg}" "${wayfile}" | head -n -1 >> ${gpxrel}
-			done
-			awk "${patternTrkSeg}" "${wayfile}" | tail -n 1 >> ${gpxrel}
-			echo -e "\t\t</trkseg>" >> ${gpxrel}
-		fi;
+		echo -e "\t\t<trkseg>" >> ${gpxrel}
+# https://stackoverflow.com/questions/38972736/how-to-print-lines-between-two-patterns-inclusive-or-exclusive-in-sed-awk-or
+		for wayfile in "${ways[@]}"; do
+			#echo "A3 ${wayfile}" >&2
+			awk "${patternTrkSeg}" "${wayfile}" | head -n -1 >> ${gpxrel}
+		done
+		awk "${patternTrkSeg}" "${wayfile}" | tail -n 1 >> ${gpxrel}
+		echo -e "\t\t</trkseg>" >> ${gpxrel}
 		echo -e "\t</trk>" >> ${gpxrel}
 	fi;
 

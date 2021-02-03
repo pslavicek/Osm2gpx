@@ -19,8 +19,8 @@ gpxHead=$(mktemp)
 
 echo "gpxMainFile=$gpxMainFile"
 echo "gpxDir=$gpxDir"
-cat -n ${gpxMainFile}
-cat -n ${gpxMainFile} | grep "<trk>"
+#cat -n ${gpxMainFile}
+#cat -n ${gpxMainFile} | grep "<trk>"
 echo "##############"
 awk "/<\?xml/{flag=1} /<trk>/{flag=0} flag" ${gpxMainFile}
 
@@ -31,7 +31,8 @@ awk "/<\?xml/{flag=1} /<trk>/{flag=0} flag" ${gpxMainFile}
 trk_array=( $(grep -Fn "trk>" ${gpxMainFile} | cut -d ":" -f1) )
 
 for i in `seq 0 2 $((${#trk_array[@]}-1))`; do
-     echo "Interval TRK ${trk_array[$i]}-${trk_array[$((i+1))]}"
+	ii=$(printf "Decimal: %02d")
+     echo "$ii. Interval TRK ${trk_array[$i]}-${trk_array[$((i+1))]}"
 done
 
 
